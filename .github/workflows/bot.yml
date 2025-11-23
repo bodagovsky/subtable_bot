@@ -12,6 +12,7 @@ on:
 jobs:
   sync-config:
     runs-on: ubuntu-latest
+    environment: production
     
     steps:
     - name: Install Heroku CLI
@@ -21,13 +22,13 @@ jobs:
     - name: Set Heroku config vars from GitHub Secrets
       run: |
         heroku config:set \
-          TELEGRAM_BOT_TOKEN=${{ env.secrets.TELEGRAM_BOT_TOKEN }} \
-          OPENAI_API_KEY=${{ env.secrets.OPENAI_API_KEY }} \
-          OPENAI_MODEL=${{ env.secrets.OPENAI_MODEL || 'gpt-4o-mini' }} \
-          WEBHOOK_URL=${{ env.secrets.WEBHOOK_URL }} \
-          WEBHOOK_PATH=${{ env.secrets.WEBHOOK_PATH || '/webhook' }} \
-          WEBHOOK_SECRET_TOKEN=${{ env.secrets.WEBHOOK_SECRET_TOKEN }} \
-          --app ${{ env.vars.HEROKU_APP_NAME }}
+          TELEGRAM_BOT_TOKEN="${{ secrets.TELEGRAM_BOT_TOKEN }}" \
+          OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+          OPENAI_MODEL="${{ secrets.OPENAI_MODEL || 'gpt-4o-mini' }}" \
+          WEBHOOK_URL="${{ secrets.WEBHOOK_URL }}" \
+          WEBHOOK_PATH="${{ secrets.WEBHOOK_PATH || '/webhook' }}" \
+          WEBHOOK_SECRET_TOKEN="${{ secrets.WEBHOOK_SECRET_TOKEN }}" \
+          --app "${{ vars.HEROKU_APP_NAME }}"
       env:
-        HEROKU_API_KEY: ${{ env.secrets.HEROKU_API_KEY }}
+        HEROKU_API_KEY: "${{ secrets.HEROKU_API_KEY }}"
 
