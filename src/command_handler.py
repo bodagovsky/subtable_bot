@@ -49,7 +49,7 @@ class CommandHandler:
             Response message
         """
         if command_name not in self.commands:
-            return f"Command '{command_name}' not found."
+            return f"Прошу прощения, сэр/мадам, но команда '{command_name}' не найдена."
         
         try:
             command = self.commands[command_name]
@@ -61,5 +61,5 @@ class CommandHandler:
             else:
                 return command.execute(parameters)
         except Exception as e:
-            return f"Error executing command: {str(e)}"
+            return f"Прошу прощения, сэр/мадам, но произошла ошибка при выполнении команды: {str(e)}"
 

@@ -1,6 +1,5 @@
 """MostActiveUser command implementation."""
 from .base import BaseCommand
-from datetime import datetime, timedelta
 from typing import Optional
 from telegram import Bot
 from collections import Counter
@@ -19,7 +18,7 @@ class MostActiveUserCommand(BaseCommand):
     def __init__(self):
         super().__init__(
             name="most_active_user",
-            description="Find the top 3 most active users in the chat within a specified time window (max 1 week)"
+            description="Найти топ-3 самых активных пользователей в чате за указанный временной период (максимум 1 неделя)"
         )
     
     def execute(self, parameters: dict = None, bot: Optional[Bot] = None, chat_id: Optional[int] = None) -> str:
@@ -35,38 +34,44 @@ class MostActiveUserCommand(BaseCommand):
             Response message with top 3 users
         """
         if not bot or not chat_id:
-            return "Error: Bot context not available for this command."
+            return "Прошу прощения, сэр/мадам, но контекст бота недоступен для этой команды."
         
         params = parameters or {}
         time_window_hours = params.get("time_window_hours")
         
         if not time_window_hours:
-            return "Error: Time window not specified."
+            return "Прошу прощения, сэр/мадам, но временной период не был указан."
         
         try:
             time_window_hours = float(time_window_hours)
         except (ValueError, TypeError):
-            return "Error: Invalid time window format."
+            return "Прошу прощения, сэр/мадам, но формат временного периода неверен."
         
         # Validate time window (max 1 week = 168 hours)
         if time_window_hours > 168:
-            return "Error: Time window cannot exceed 1 week (168 hours)."
+            return "Прошу прощения, сэр/мадам, но временной период не может превышать одну неделю (168 часов)."
         
         if time_window_hours <= 0:
-            return "Error: Time window must be positive."
+            return "Прошу прощения, сэр/мадам, но временной период должен быть положительным числом."
         
         try:
             # Get user counts from message storage
             user_counts = message_storage.get_user_counts(chat_id, time_window_hours)
             
             if not user_counts:
-                return f"No messages found in the last {time_window_hours} hours."
+                hours_text = "часов" if time_window_hours != 1 else "час"
+                if time_window_hours in [2, 3, 4]:
+                    hours_text = "часа"
+                return f"Прошу прощения, сэр/мадам, но сообщений не найдено за последние {int(time_window_hours)} {hours_text}."
             
             # Get top 3 users
             top_users = Counter(user_counts).most_common(3)
             
             # Format response
-            response = f"**Top 3 most active users in the last {time_window_hours} hours:**\n\n"
+            hours_text = "часов" if time_window_hours != 1 else "час"
+            if time_window_hours in [2, 3, 4]:
+                hours_text = "часа"
+            response = f"К вашим услугам, сэр/мадам. **Топ-3 самых активных пользователей за последние {int(time_window_hours)} {hours_text}:**\n\n"
             
             for i, (user_id, count) in enumerate(top_users, 1):
                 try:
@@ -74,20 +79,22 @@ class MostActiveUserCommand(BaseCommand):
                     # Note: This is a synchronous call in python-telegram-bot
                     chat_member = bot.get_chat_member(chat_id, user_id)
                     user = chat_member.user
-                    user_name = user.first_name or "Unknown"
+                    user_name = user.first_name or "Неизвестно"
                     if user.last_name:
                         user_name += f" {user.last_name}"
                     if user.username:
                         user_name += f" (@{user.username})"
-                    response += f"{i}. {user_name}: {count} messages\n"
+                    messages_text = "сообщений" if count % 10 in [0, 5, 6, 7, 8, 9] or count % 100 in [11, 12, 13, 14] else "сообщения" if count % 10 in [2, 3, 4] else "сообщение"
+                    response += f"{i}. {user_name}: {count} {messages_text}\n"
                 except Exception as e:
                     logger.warning(f"Could not get user info for {user_id}: {e}")
                     # If we can't get user info, use user ID
-                    response += f"{i}. User {user_id}: {count} messages\n"
+                    messages_text = "сообщений" if count % 10 in [0, 5, 6, 7, 8, 9] or count % 100 in [11, 12, 13, 14] else "сообщения" if count % 10 in [2, 3, 4] else "сообщение"
+                    response += f"{i}. Пользователь {user_id}: {count} {messages_text}\n"
             
             return response
             
         except Exception as e:
             logger.error(f"Error in MostActiveUser command: {e}")
-            return f"Error executing command: {str(e)}"
+            return f"Прошу прощения, сэр/мадам, но произошла ошибка при выполнении команды: {str(e)}"
 

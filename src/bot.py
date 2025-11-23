@@ -87,20 +87,21 @@ def should_process_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
-    welcome_message = """Hello! I'm a bot powered by ChatGPT.
+    welcome_message = """Добро пожаловать, сэр/мадам. Я Альфред, ваш помощник-бот на базе ChatGPT.
     
-You can ask me to perform commands in natural language, and I'll try to understand and execute them.
+Я к вашим услугам и готов выполнить команды на естественном языке. Просто обратитесь ко мне, и я постараюсь понять и выполнить вашу просьбу.
 
-Available commands:
-- Get current time
-- Generate random numbers
-- Echo messages
+Доступные команды:
+- Получить текущее время
+- Сгенерировать случайные числа
+- Повторить сообщение
+- Найти самых активных пользователей
 
-How to use:
-1. Mention me (@botname) with your request - I only respond when explicitly mentioned
-2. Reply to my message with your request
+Как обратиться:
+1. Упомяните меня (@имя_бота) с вашим запросом - я отвечаю только при явном упоминании
+2. Ответьте на мое сообщение с вашим запросом
 
-I'll ask for confirmation before executing any command!"""
+Я буду вежливо спрашивать подтверждение перед выполнением любой команды, как и подобает хорошему помощнику."""
     
     # Handle both private chats and channels
     if update.message:
@@ -156,7 +157,7 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Clear pending command
         del context.user_data["pending_command"]
         
-        await update.message.reply_text("Command cancelled. Feel free to make another request!")
+        await update.message.reply_text("Как вам будет угодно, сэр/мадам. Команда отменена. Я готов к вашим дальнейшим распоряжениям.")
         return True
 
 
@@ -202,9 +203,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 # Ask for confirmation
                 time_window_hours = parameters["time_window_hours"]
-                confirmation_message = "I understood you want to execute: **Most Active User**\n\n"
-                confirmation_message += f"Time window: {time_window_hours} hours\n\n"
-                confirmation_message += "Is this correct? Reply with 'yes' to confirm."
+                confirmation_message = "Понял вас, сэр/мадам. Вы желаете выполнить: **Самые активные пользователи**\n\n"
+                confirmation_message += f"Временной период: {time_window_hours} часов\n\n"
+                confirmation_message += "Верно ли я вас понял? Пожалуйста, подтвердите, ответив 'да'."
                 
                 await update.message.reply_text(confirmation_message, parse_mode="Markdown")
                 return
@@ -214,16 +215,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     # Second attempt failed - give up
                     del context.user_data["pending_time_window"]
                     await update.message.reply_text(
-                        "I'm sorry, I couldn't understand the time window you specified. "
-                        "Please try again later with a clearer time period (e.g., 'last day', 'last 3 hours')."
+                        "Прошу прощения, сэр/мадам, но я не смог понять указанный вами временной период. "
+                        "Будьте так любезны, попробуйте еще раз с более конкретным периодом (например, 'за последний день', 'за последние 3 часа')."
                     )
                     return
                 else:
                     # First attempt failed - try once more
                     context.user_data["pending_time_window"]["attempt"] = 2
                     await update.message.reply_text(
-                        "I still couldn't extract the time window. Please try again with a clearer format, "
-                        "for example: 'last day', 'last 3 hours', 'past week' (max 1 week)."
+                        "Прошу прощения, сэр/мадам, но я всё ещё не смог определить временной период. "
+                        "Будьте так любезны, попробуйте ещё раз с более понятным форматом, "
+                        "например: 'за последний день', 'за последние 3 часа', 'за прошлую неделю' (максимум одна неделя)."
                     )
                     return
     
@@ -282,11 +284,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 cmd_description = cmd_info["description"] if cmd_info else command_name
                 
                 time_window_hours = parameters["time_window_hours"]
-                confirmation_message = f"I understood you want to execute: **{cmd_description}**\n\n"
-                confirmation_message += f"Time window: {time_window_hours} hours\n\n"
+                confirmation_message = f"Понял вас, сэр/мадам. Вы желаете выполнить: **{cmd_description}**\n\n"
+                confirmation_message += f"Временной период: {time_window_hours} часов\n\n"
                 if reasoning:
-                    confirmation_message += f"Reasoning: {reasoning}\n\n"
-                confirmation_message += "Is this correct? Reply with 'yes' to confirm."
+                    confirmation_message += f"Мое понимание: {reasoning}\n\n"
+                confirmation_message += "Верно ли я вас понял? Пожалуйста, подтвердите, ответив 'да'."
                 
                 await message_obj.reply_text(confirmation_message, parse_mode="Markdown")
             else:
@@ -296,9 +298,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "attempt": 1
                 }
                 await message_obj.reply_text(
-                    "I understand you want to find the most active users, but I couldn't extract the time window from your message.\n\n"
-                    "Please specify the time period (e.g., 'last day', 'last 3 hours', 'past week'). "
-                    "Maximum allowed is 1 week."
+                    "Понял вас, сэр/мадам. Вы желаете найти самых активных пользователей, однако я не смог определить временной период из вашего сообщения.\n\n"
+                    "Будьте так любезны, укажите временной период (например, 'за последний день', 'за последние 3 часа', 'за прошлую неделю'). "
+                    "Максимально допустимый период составляет одну неделю."
                 )
         else:
             # Regular command - ask for confirmation
@@ -315,12 +317,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cmd_info = next((c for c in available_commands if c["name"] == command_name), None)
             cmd_description = cmd_info["description"] if cmd_info else command_name
             
-            confirmation_message = f"I understood you want to execute: **{cmd_description}**\n\n"
+            confirmation_message = f"Понял вас, сэр/мадам. Вы желаете выполнить: **{cmd_description}**\n\n"
             if parameters:
-                confirmation_message += f"Parameters: {parameters}\n\n"
+                confirmation_message += f"Параметры: {parameters}\n\n"
             if reasoning:
-                confirmation_message += f"Reasoning: {reasoning}\n\n"
-            confirmation_message += "Is this correct? Reply with 'yes' to confirm."
+                confirmation_message += f"Мое понимание: {reasoning}\n\n"
+            confirmation_message += "Верно ли я вас понял? Пожалуйста, подтвердите, ответив 'да'."
             
             # Reply to user's message asking for confirmation
             await message_obj.reply_text(confirmation_message, parse_mode="Markdown")

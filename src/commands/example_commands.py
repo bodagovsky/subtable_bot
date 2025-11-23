@@ -10,12 +10,12 @@ class TimeCommand(BaseCommand):
     def __init__(self):
         super().__init__(
             name="get_time",
-            description="Get the current date and time"
+            description="Получить текущую дату и время"
         )
     
     def execute(self, parameters: dict = None) -> str:
         now = datetime.now()
-        return f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+        return f"К вашим услугам, сэр/мадам. Текущее время: {now.strftime('%Y-%m-%d %H:%M:%S')}"
 
 
 class RandomNumberCommand(BaseCommand):
@@ -24,7 +24,7 @@ class RandomNumberCommand(BaseCommand):
     def __init__(self):
         super().__init__(
             name="random_number",
-            description="Generate a random number between min and max (default: 1-100)"
+            description="Сгенерировать случайное число между min и max (по умолчанию: 1-100)"
         )
     
     def execute(self, parameters: dict = None) -> str:
@@ -32,7 +32,7 @@ class RandomNumberCommand(BaseCommand):
         min_val = int(params.get("min", 1))
         max_val = int(params.get("max", 100))
         number = random.randint(min_val, max_val)
-        return f"Random number: {number}"
+        return f"Как вам будет угодно, сэр/мадам. Случайное число: {number}"
 
 
 class EchoCommand(BaseCommand):
@@ -41,11 +41,11 @@ class EchoCommand(BaseCommand):
     def __init__(self):
         super().__init__(
             name="echo",
-            description="Echo back a message or text"
+            description="Повторить сообщение или текст"
         )
     
     def execute(self, parameters: dict = None) -> str:
         params = parameters or {}
-        message = params.get("message", "No message provided")
-        return f"Echo: {message}"
+        message = params.get("message", "Сообщение не предоставлено")
+        return f"Конечно, сэр/мадам. Эхо: {message}"
 

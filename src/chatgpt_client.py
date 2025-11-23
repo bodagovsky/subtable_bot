@@ -78,18 +78,18 @@ Respond in JSON format:
             for cmd in available_commands
         ])
         
-        prompt = f"""The user sent this message: "{user_message}"
+        prompt = f"""Пользователь отправил это сообщение: "{user_message}"
 
-Available commands:
+Доступные команды:
 {commands_context}
 
-I couldn't match the user's request to any of the available commands. 
-Generate a helpful clarification message that:
-1. Politely explains that you couldn't understand their request
-2. Lists the available commands they can use
-3. Asks them to rephrase their request or choose a specific command
+Я не смог сопоставить запрос пользователя ни с одной из доступных команд. 
+Сгенерируйте полезное сообщение для уточнения, которое:
+1. Вежливо объясняет, что вы не смогли понять их запрос
+2. Перечисляет доступные команды, которые они могут использовать
+3. Просит их переформулировать запрос или выбрать конкретную команду
 
-Keep the message friendly and concise."""
+Сообщение должно быть дружелюбным и кратким. Отвечайте на русском языке."""
         
         try:
             response = self.client.chat.completions.create(
@@ -102,7 +102,7 @@ Keep the message friendly and concise."""
             )
             return response.choices[0].message.content
         except Exception as e:
-            return f"I couldn't understand your request. Please try rephrasing it or mention one of the available commands."
+            return "Прошу прощения, сэр/мадам, но я не смог понять ваш запрос. Будьте так любезны, попробуйте переформулировать его или упомяните одну из доступных команд."
     
     def extract_time_window(self, user_message: str) -> dict:
         """
@@ -114,29 +114,37 @@ Keep the message friendly and concise."""
         Returns:
             dict with 'time_window_hours' (float or None) and 'success' (bool)
         """
-        prompt = f"""Extract the time window from this user message: "{user_message}"
+        prompt = f"""Извлеките временной период из этого сообщения пользователя: "{user_message}"
 
-The user is asking about activity within a specific time period. Extract the time window and convert it to hours.
+Пользователь спрашивает об активности в определенный период времени. Извлеките временной период и преобразуйте его в часы.
 
-Examples:
+Примеры на русском:
+- "за последний день" или "за прошедший день" = 24 часа
+- "за последние 2 дня" = 48 часов
+- "за последнюю неделю" = 168 часов
+- "за последние 3 часа" = 3 часа
+- "за прошедшие 12 часов" = 12 часов
+- "вчера" = 24 часа
+- "за последние 5 дней" = 120 часов
+- "за день" = 24 часа
+- "за неделю" = 168 часов
+
+Примеры на английском (для совместимости):
 - "last day" or "past day" = 24 hours
 - "last 2 days" = 48 hours
 - "last week" = 168 hours
 - "last 3 hours" = 3 hours
-- "past 12 hours" = 12 hours
-- "yesterday" = 24 hours
-- "last 5 days" = 120 hours
 
-IMPORTANT:
-- Maximum allowed is 1 week (168 hours)
-- Return null if you cannot extract a valid time window
-- Return the time in hours as a number
+ВАЖНО:
+- Максимально допустимый период - 1 неделя (168 часов)
+- Верните null, если не можете извлечь действительный временной период
+- Верните время в часах в виде числа
 
-Respond in JSON format:
+Отвечайте в формате JSON:
 {{
-    "time_window_hours": <number in hours or null>,
-    "success": <true or false>,
-    "reasoning": "brief explanation"
+    "time_window_hours": <число в часах или null>,
+    "success": <true или false>,
+    "reasoning": "краткое объяснение"
 }}"""
         
         try:
@@ -163,13 +171,13 @@ Respond in JSON format:
                         return {
                             "time_window_hours": None,
                             "success": False,
-                            "reasoning": "Time window exceeds 1 week maximum"
+                            "reasoning": "Временной период превышает максимум в 1 неделю"
                         }
                     if time_window <= 0:
                         return {
                             "time_window_hours": None,
                             "success": False,
-                            "reasoning": "Time window must be positive"
+                            "reasoning": "Временной период должен быть положительным"
                         }
                     result["time_window_hours"] = time_window
                     result["success"] = True
@@ -185,7 +193,7 @@ Respond in JSON format:
             return {
                 "time_window_hours": None,
                 "success": False,
-                "reasoning": f"Error extracting time window: {str(e)}"
+                "reasoning": f"Ошибка при извлечении временного периода: {str(e)}"
             }
     
     def generate_response(self, user_message: str) -> str:
@@ -201,5 +209,5 @@ Respond in JSON format:
             )
             return response.choices[0].message.content
         except Exception as e:
-            return f"Sorry, I encountered an error: {str(e)}"
+            return f"Прошу прощения, сэр/мадам, но произошла ошибка: {str(e)}"
 
