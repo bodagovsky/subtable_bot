@@ -27,7 +27,7 @@ jobs:
           WEBHOOK_URL="${{ secrets.WEBHOOK_URL }}" \
           WEBHOOK_PATH="${{ secrets.WEBHOOK_PATH || '/webhook' }}" \
           WEBHOOK_SECRET_TOKEN="${{ secrets.WEBHOOK_SECRET_TOKEN }}" \
-          --app ${{ secrets.HEROKU_APP_NAME }}
+          --app ${{ vars.HEROKU_APP_NAME }}
       env:
         HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
 
