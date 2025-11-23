@@ -82,25 +82,37 @@ The bot is configured for Heroku deployment with automatic webhook setup.
    heroku logs --tail
    ```
 
-#### Automatic Deployment via GitHub Actions
+#### Automatic Deployment via Heroku GitHub Integration (Recommended)
 
-1. **Set up GitHub Secrets**:
-   - Go to your repository on GitHub
-   - Navigate to **Settings** > **Secrets and variables** > **Actions**
-   - Add the following secrets:
-     - `HEROKU_API_KEY`: Get from [dashboard.heroku.com/account](https://dashboard.heroku.com/account)
-     - `HEROKU_APP_NAME`: Your Heroku app name
-     - `HEROKU_EMAIL`: Your Heroku account email
+1. **Connect Heroku to GitHub**:
+   - Go to your Heroku app dashboard
+   - Navigate to **Deploy** tab
+   - Connect your GitHub repository
+   - Enable **Automatic deploys** from `main` branch
+   - Heroku will automatically deploy when you push to `main`
+
+2. **Set Config Vars in Heroku Dashboard**:
+   - Go to your Heroku app dashboard
+   - Navigate to **Settings** > **Config Vars**
+   - Click **Reveal Config Vars** and add:
      - `TELEGRAM_BOT_TOKEN`: Your Telegram bot token
      - `OPENAI_API_KEY`: Your OpenAI API key
      - `WEBHOOK_URL`: Your Heroku app URL (e.g., `https://your-bot-name.herokuapp.com`)
+     - `WEBHOOK_PATH`: (Optional) Webhook path (default: `/webhook`)
      - `WEBHOOK_SECRET_TOKEN`: (Optional) Secret token for webhook verification
      - `OPENAI_MODEL`: (Optional) Model to use (default: `gpt-4o-mini`)
-     - `WEBHOOK_PATH`: (Optional) Webhook path (default: `/webhook`)
 
-2. **Deploy**:
-   - Push to `main` or `master` branch
-   - The workflow will automatically deploy to Heroku and set config vars
+3. **Deploy**:
+   - Push to `main` branch
+   - Heroku automatically deploys your app
+
+#### Optional: Sync Config Vars from GitHub Secrets
+
+If you prefer to manage secrets in GitHub and sync them to Heroku automatically:
+
+1. **Set up GitHub Secrets** (same as above)
+2. **The included `.github/workflows/bot.yml`** will automatically sync GitHub Secrets to Heroku config vars on each push
+3. **Note**: This workflow only syncs config vars - deployment is handled by Heroku's GitHub integration
 
 #### Important Notes for Heroku
 
@@ -134,11 +146,110 @@ The bot uses webhooks to receive updates from Telegram (instead of long polling)
 
 ### Development Setup with ngrok
 
-1. Install ngrok: `brew install ngrok` (macOS) or download from [ngrok.com](https://ngrok.com)
-2. Start ngrok tunnel: `ngrok http 8443`
-3. Copy the HTTPS URL (e.g., `https://abc123.ngrok.io`)
-4. Set `WEBHOOK_URL=https://abc123.ngrok.io` in your `.env` file
-5. Run the bot: `python src/bot.py`
+Follow these steps to run the bot locally with ngrok:
+
+#### Step 1: Install ngrok
+
+**macOS:**
+```bash
+brew install ngrok
+```
+
+**Other platforms:**
+- Download from [ngrok.com](https://ngrok.com/download)
+- Or use package manager: `sudo apt install ngrok` (Linux) / `choco install ngrok` (Windows)
+
+#### Step 2: Set up environment variables
+
+1. Create a `.env` file in the project root (if it doesn't exist):
+   ```bash
+   cp .env.example .env  # If you have .env.example
+   ```
+
+2. Add your API keys to `.env`:
+   ```env
+   TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+   OPENAI_API_KEY=your_openai_api_key_here
+   WEBHOOK_PORT=8443
+   WEBHOOK_PATH=/webhook
+   ```
+
+   **Note:** Don't set `WEBHOOK_URL` yet - we'll get it from ngrok in the next step.
+
+#### Step 3: Start ngrok tunnel
+
+In a **separate terminal window**, run:
+```bash
+ngrok http 8443
+```
+
+You'll see output like:
+```
+Forwarding  https://abc123.ngrok.io -> http://localhost:8443
+```
+
+**Copy the HTTPS URL** (e.g., `https://abc123.ngrok.io`) - you'll need it in the next step.
+
+#### Step 4: Update .env with ngrok URL
+
+Add the ngrok URL to your `.env` file:
+```env
+WEBHOOK_URL=https://abc123.ngrok.io
+```
+
+**Important:** Use the HTTPS URL from ngrok, not the HTTP one.
+
+#### Step 5: Run the bot
+
+In your main terminal (with the virtual environment activated if using one):
+```bash
+# Activate virtual environment (if using one)
+source venv/bin/activate  # macOS/Linux
+# or
+venv\Scripts\activate  # Windows
+
+# Install dependencies (if not already installed)
+pip install -r requirements.txt
+
+# Run the bot
+python src/bot.py
+```
+
+You should see output like:
+```
+Bot starting with webhook...
+Webhook URL: https://abc123.ngrok.io
+Webhook port: 8443
+Webhook path: /webhook
+Webhook server started on port 8443
+```
+
+#### Step 6: Test the bot
+
+1. Open Telegram and find your bot
+2. Send `/start` to verify it's working
+3. Mention the bot or reply to its messages to test commands
+
+#### Troubleshooting
+
+- **"WEBHOOK_URL not set"**: Make sure you added `WEBHOOK_URL` to your `.env` file
+- **"Port already in use"**: Change `WEBHOOK_PORT` in `.env` to a different port (e.g., `8444`) and update ngrok accordingly
+- **ngrok URL changes**: Free ngrok URLs change on restart. Update `WEBHOOK_URL` in `.env` and restart the bot
+- **Bot not responding**: Check that both ngrok and the bot are running, and verify the webhook URL is correct
+
+#### Quick Start Script
+
+You can also create a simple script to automate this:
+
+**`run-local.sh`** (macOS/Linux):
+```bash
+#!/bin/bash
+echo "Starting ngrok..."
+ngrok http 8443 &
+sleep 3
+echo "Please copy the HTTPS URL from ngrok and update WEBHOOK_URL in .env"
+echo "Then run: python src/bot.py"
+```
 
 ### Production Setup
 

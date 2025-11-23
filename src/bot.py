@@ -127,7 +127,7 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
         return False
     
     # Check if user confirmed
-    if user_message in ["yes", "y", "да", "ok", "okay", "confirm", "execute"]:
+    if user_message in ["yes", "y", "да", "ok", "okay", "confirm", "execute", "верно", "ага"]:
         # Execute the pending command
         command_name = pending_command["command"]
         parameters = pending_command.get("parameters", {})
