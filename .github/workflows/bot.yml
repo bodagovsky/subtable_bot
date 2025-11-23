@@ -1,0 +1,40 @@
+name: Deploy to Heroku
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Deploy to Heroku
+      uses: akhileshns/heroku-deploy@v3.12.12
+      with:
+        heroku_api_key: ${{ secrets.HEROKU_API_KEY }}
+        heroku_app_name: ${{ secrets.HEROKU_APP_NAME }}
+        heroku_email: ${{ secrets.HEROKU_EMAIL }}
+        appdir: "."
+        
+    - name: Install Heroku CLI
+      run: |
+        curl https://cli-assets.heroku.com/install.sh | sh
+    
+    - name: Set Heroku config vars
+      run: |
+        heroku config:set \
+          TELEGRAM_BOT_TOKEN="${{ secrets.TELEGRAM_BOT_TOKEN }}" \
+          OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" \
+          OPENAI_MODEL="${{ secrets.OPENAI_MODEL || 'gpt-4o-mini' }}" \
+          WEBHOOK_URL="${{ secrets.WEBHOOK_URL }}" \
+          WEBHOOK_PATH="${{ secrets.WEBHOOK_PATH || '/webhook' }}" \
+          WEBHOOK_SECRET_TOKEN="${{ secrets.WEBHOOK_SECRET_TOKEN }}" \
+          --app ${{ secrets.HEROKU_APP_NAME }}
+      env:
+        HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+
