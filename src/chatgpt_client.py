@@ -104,6 +104,90 @@ Keep the message friendly and concise."""
         except Exception as e:
             return f"I couldn't understand your request. Please try rephrasing it or mention one of the available commands."
     
+    def extract_time_window(self, user_message: str) -> dict:
+        """
+        Extract time window from user message.
+        
+        Args:
+            user_message: The user's message containing time window information
+            
+        Returns:
+            dict with 'time_window_hours' (float or None) and 'success' (bool)
+        """
+        prompt = f"""Extract the time window from this user message: "{user_message}"
+
+The user is asking about activity within a specific time period. Extract the time window and convert it to hours.
+
+Examples:
+- "last day" or "past day" = 24 hours
+- "last 2 days" = 48 hours
+- "last week" = 168 hours
+- "last 3 hours" = 3 hours
+- "past 12 hours" = 12 hours
+- "yesterday" = 24 hours
+- "last 5 days" = 120 hours
+
+IMPORTANT:
+- Maximum allowed is 1 week (168 hours)
+- Return null if you cannot extract a valid time window
+- Return the time in hours as a number
+
+Respond in JSON format:
+{{
+    "time_window_hours": <number in hours or null>,
+    "success": <true or false>,
+    "reasoning": "brief explanation"
+}}"""
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.3
+            )
+            
+            import json
+            result = json.loads(response.choices[0].message.content)
+            
+            # Validate the result
+            time_window = result.get("time_window_hours")
+            if time_window is not None:
+                try:
+                    time_window = float(time_window)
+                    # Validate max 1 week
+                    if time_window > 168:
+                        return {
+                            "time_window_hours": None,
+                            "success": False,
+                            "reasoning": "Time window exceeds 1 week maximum"
+                        }
+                    if time_window <= 0:
+                        return {
+                            "time_window_hours": None,
+                            "success": False,
+                            "reasoning": "Time window must be positive"
+                        }
+                    result["time_window_hours"] = time_window
+                    result["success"] = True
+                except (ValueError, TypeError):
+                    result["success"] = False
+                    result["time_window_hours"] = None
+            else:
+                result["success"] = False
+            
+            return result
+            
+        except Exception as e:
+            return {
+                "time_window_hours": None,
+                "success": False,
+                "reasoning": f"Error extracting time window: {str(e)}"
+            }
+    
     def generate_response(self, user_message: str) -> str:
         """Generate a conversational response when no command is matched."""
         try:

@@ -13,6 +13,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from config import TELEGRAM_BOT_TOKEN, WEBHOOK_URL, WEBHOOK_PORT, WEBHOOK_PATH, WEBHOOK_SECRET_TOKEN
 from chatgpt_client import ChatGPTClient
 from command_handler import CommandHandler as BotCommandHandler
+from message_storage import message_storage
+from datetime import datetime
 
 # Enable logging
 logging.basicConfig(
@@ -134,8 +136,12 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         logger.info(f"User confirmed command: {command_name} with parameters: {parameters}")
         
+        # Get bot and chat_id for commands that need them
+        bot = context.bot
+        chat_id = update.message.chat.id
+        
         # Execute the command
-        response = command_handler.execute_command(command_name, parameters)
+        response = command_handler.execute_command(command_name, parameters, bot=bot, chat_id=chat_id)
         
         # Clear pending command
         del context.user_data["pending_command"]
@@ -156,6 +162,71 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming text messages."""
+    # Store message for tracking (if it's a regular message)
+    message_obj = update.message if update.message else update.channel_post
+    if message_obj and message_obj.from_user and message_obj.chat:
+        try:
+            message_timestamp = datetime.utcnow()
+            if message_obj.date:
+                message_timestamp = message_obj.date
+            message_storage.add_message(
+                chat_id=message_obj.chat.id,
+                user_id=message_obj.from_user.id,
+                message_id=message_obj.message_id,
+                timestamp=message_timestamp
+            )
+        except Exception as e:
+            logger.debug(f"Could not store message: {e}")
+    
+    # Check if this is a time window extraction retry
+    if context.user_data.get("pending_time_window"):
+        pending_tw = context.user_data["pending_time_window"]
+        command_name = pending_tw["command"]
+        attempt = pending_tw.get("attempt", 1)
+        
+        # Check if this is a reply to bot's message
+        if is_reply_to_bot(update, context) and update.message:
+            user_message = update.message.text
+            
+            # Try to extract time window again
+            time_window_result = chatgpt.extract_time_window(user_message)
+            
+            if time_window_result.get("success") and time_window_result.get("time_window_hours"):
+                # Success - store as pending command
+                parameters = {"time_window_hours": time_window_result["time_window_hours"]}
+                context.user_data["pending_command"] = {
+                    "command": command_name,
+                    "parameters": parameters
+                }
+                del context.user_data["pending_time_window"]
+                
+                # Ask for confirmation
+                time_window_hours = parameters["time_window_hours"]
+                confirmation_message = "I understood you want to execute: **Most Active User**\n\n"
+                confirmation_message += f"Time window: {time_window_hours} hours\n\n"
+                confirmation_message += "Is this correct? Reply with 'yes' to confirm."
+                
+                await update.message.reply_text(confirmation_message, parse_mode="Markdown")
+                return
+            else:
+                # Failed again
+                if attempt >= 2:
+                    # Second attempt failed - give up
+                    del context.user_data["pending_time_window"]
+                    await update.message.reply_text(
+                        "I'm sorry, I couldn't understand the time window you specified. "
+                        "Please try again later with a clearer time period (e.g., 'last day', 'last 3 hours')."
+                    )
+                    return
+                else:
+                    # First attempt failed - try once more
+                    context.user_data["pending_time_window"]["attempt"] = 2
+                    await update.message.reply_text(
+                        "I still couldn't extract the time window. Please try again with a clearer format, "
+                        "for example: 'last day', 'last 3 hours', 'past week' (max 1 week)."
+                    )
+                    return
+    
     # Check if this is a confirmation response
     if context.user_data.get("pending_command"):
         handled = await handle_confirmation(update, context)
@@ -190,29 +261,69 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         command_name = None
     
     if command_name and command_name in command_handler.commands:
-        # Command found - ask for confirmation
-        parameters = analysis.get("parameters", {})
-        reasoning = analysis.get("reasoning", "")
-        
-        # Store pending command
-        context.user_data["pending_command"] = {
-            "command": command_name,
-            "parameters": parameters
-        }
-        
-        # Get command description for confirmation message
-        cmd_info = next((c for c in available_commands if c["name"] == command_name), None)
-        cmd_description = cmd_info["description"] if cmd_info else command_name
-        
-        confirmation_message = f"I understood you want to execute: **{cmd_description}**\n\n"
-        if parameters:
-            confirmation_message += f"Parameters: {parameters}\n\n"
-        if reasoning:
-            confirmation_message += f"Reasoning: {reasoning}\n\n"
-        confirmation_message += "Is this correct? Reply with 'yes' to confirm."
-        
-        # Reply to user's message asking for confirmation
-        await message_obj.reply_text(confirmation_message, parse_mode="Markdown")
+        # Command found - handle special case for most_active_user
+        if command_name == "most_active_user":
+            # Extract time window from the message
+            time_window_result = chatgpt.extract_time_window(user_message)
+            
+            if time_window_result.get("success") and time_window_result.get("time_window_hours"):
+                # Time window extracted successfully
+                parameters = {"time_window_hours": time_window_result["time_window_hours"]}
+                reasoning = time_window_result.get("reasoning", "")
+                
+                # Store pending command
+                context.user_data["pending_command"] = {
+                    "command": command_name,
+                    "parameters": parameters
+                }
+                
+                # Get command description for confirmation message
+                cmd_info = next((c for c in available_commands if c["name"] == command_name), None)
+                cmd_description = cmd_info["description"] if cmd_info else command_name
+                
+                time_window_hours = parameters["time_window_hours"]
+                confirmation_message = f"I understood you want to execute: **{cmd_description}**\n\n"
+                confirmation_message += f"Time window: {time_window_hours} hours\n\n"
+                if reasoning:
+                    confirmation_message += f"Reasoning: {reasoning}\n\n"
+                confirmation_message += "Is this correct? Reply with 'yes' to confirm."
+                
+                await message_obj.reply_text(confirmation_message, parse_mode="Markdown")
+            else:
+                # Time window extraction failed - ask user for time window
+                context.user_data["pending_time_window"] = {
+                    "command": command_name,
+                    "attempt": 1
+                }
+                await message_obj.reply_text(
+                    "I understand you want to find the most active users, but I couldn't extract the time window from your message.\n\n"
+                    "Please specify the time period (e.g., 'last day', 'last 3 hours', 'past week'). "
+                    "Maximum allowed is 1 week."
+                )
+        else:
+            # Regular command - ask for confirmation
+            parameters = analysis.get("parameters", {})
+            reasoning = analysis.get("reasoning", "")
+            
+            # Store pending command
+            context.user_data["pending_command"] = {
+                "command": command_name,
+                "parameters": parameters
+            }
+            
+            # Get command description for confirmation message
+            cmd_info = next((c for c in available_commands if c["name"] == command_name), None)
+            cmd_description = cmd_info["description"] if cmd_info else command_name
+            
+            confirmation_message = f"I understood you want to execute: **{cmd_description}**\n\n"
+            if parameters:
+                confirmation_message += f"Parameters: {parameters}\n\n"
+            if reasoning:
+                confirmation_message += f"Reasoning: {reasoning}\n\n"
+            confirmation_message += "Is this correct? Reply with 'yes' to confirm."
+            
+            # Reply to user's message asking for confirmation
+            await message_obj.reply_text(confirmation_message, parse_mode="Markdown")
     else:
         # No command found - ask for clarification
         clarification_message = chatgpt.generate_clarification(user_message, available_commands)

@@ -6,6 +6,7 @@ from commands.example_commands import (
     RandomNumberCommand,
     EchoCommand
 )
+from commands.most_active_user import MostActiveUserCommand
 
 
 class CommandHandler:
@@ -20,7 +21,8 @@ class CommandHandler:
         default_commands = [
             TimeCommand(),
             RandomNumberCommand(),
-            EchoCommand()
+            EchoCommand(),
+            MostActiveUserCommand()
         ]
         for cmd in default_commands:
             self.register_command(cmd)
@@ -33,13 +35,15 @@ class CommandHandler:
         """Get list of available commands with descriptions."""
         return [cmd.get_info() for cmd in self.commands.values()]
     
-    def execute_command(self, command_name: str, parameters: dict = None) -> str:
+    def execute_command(self, command_name: str, parameters: dict = None, bot=None, chat_id: int = None) -> str:
         """
         Execute a command by name.
         
         Args:
             command_name: Name of the command to execute
             parameters: Parameters for the command
+            bot: Optional bot instance (for commands that need it)
+            chat_id: Optional chat ID (for commands that need it)
             
         Returns:
             Response message
@@ -48,7 +52,14 @@ class CommandHandler:
             return f"Command '{command_name}' not found."
         
         try:
-            return self.commands[command_name].execute(parameters)
+            command = self.commands[command_name]
+            # Check if command needs bot/chat_id (has execute signature with these params)
+            import inspect
+            sig = inspect.signature(command.execute)
+            if 'bot' in sig.parameters or 'chat_id' in sig.parameters:
+                return command.execute(parameters, bot=bot, chat_id=chat_id)
+            else:
+                return command.execute(parameters)
         except Exception as e:
             return f"Error executing command: {str(e)}"
 
