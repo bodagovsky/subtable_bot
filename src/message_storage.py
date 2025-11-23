@@ -40,7 +40,7 @@ class MessageStorage:
             return {}
         
         # Calculate cutoff time
-        cutoff_time = datetime.utcnow() - timedelta(hours=time_window_hours)
+        cutoff_time = datetime.now(datetime.timezone.utc) - timedelta(hours=time_window_hours)
         
         # Count messages per user
         user_counts = defaultdict(int)
@@ -55,7 +55,7 @@ class MessageStorage:
         if chat_id not in self.messages:
             return
         
-        cutoff_time = datetime.utcnow() - timedelta(days=self.max_age_days)
+        cutoff_time = datetime.now(datetime.timezone.utc) - timedelta(days=self.max_age_days)
         self.messages[chat_id] = [
             (ts, uid, mid) for ts, uid, mid in self.messages[chat_id]
             if ts >= cutoff_time
