@@ -48,10 +48,49 @@ def is_reply_to_bot(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     return replied_message.from_user and replied_message.from_user.id == context.bot.id
 
 
+def is_name_called(message_text: str) -> tuple[bool, str]:
+    """
+    Check if bot's name (Альфред/Alfred) is explicitly called at the start of the message.
+    
+    Args:
+        message_text: The message text to check
+        
+    Returns:
+        Tuple of (is_called, extracted_message)
+        If name is called, returns (True, message_without_name)
+        Otherwise returns (False, "")
+    """
+    if not message_text:
+        return False, ""
+    
+    # Bot name variations (case insensitive)
+    name_patterns = [
+        r"^альфред\s*[,:]\s*",  # "Альфред, " or "Альфред: "
+        r"^альфред\s+",  # "Альфред " (with space)
+        r"^alfred\s*[,:]\s*",  # "Alfred, " or "Alfred: " (English)
+        r"^alfred\s+",  # "Alfred " (English, with space)
+    ]
+    
+    message_lower = message_text.lower()
+    
+    for pattern in name_patterns:
+        match = re.match(pattern, message_lower, re.IGNORECASE)
+        if match:
+            # Extract message after the name
+            extracted = message_text[match.end():].strip()
+            if extracted:  # Only return True if there's content after the name
+                return True, extracted
+    
+    return False, ""
+
+
 def should_process_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> tuple[bool, str]:
     """
     Determine if message should be processed and extract user message.
-    Bot only responds when explicitly mentioned or when replying to bot's message.
+    Bot responds when:
+    1. Explicitly mentioned (@botname)
+    2. Replying to bot's message
+    3. Bot's name is explicitly called (Альфред/Alfred)
     Returns: (should_process, user_message)
     """
     if update.message:
@@ -68,7 +107,12 @@ def should_process_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             user_message = re.sub(f"@{re.escape(bot_username)}", "", message_text, flags=re.IGNORECASE).strip()
             return True, user_message
         
-        # Don't process messages where bot is not mentioned
+        # Check if bot's name is explicitly called
+        is_called, extracted_message = is_name_called(message_text)
+        if is_called:
+            return True, extracted_message
+        
+        # Don't process messages where bot is not mentioned or called
         return False, ""
     
     elif update.channel_post:
@@ -80,7 +124,12 @@ def should_process_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             user_message = re.sub(f"@{re.escape(bot_username)}", "", message_text, flags=re.IGNORECASE).strip()
             return True, user_message
         
-        # Only process if mentioned
+        # Check if bot's name is explicitly called
+        is_called, extracted_message = is_name_called(message_text)
+        if is_called:
+            return True, extracted_message
+        
+        # Only process if mentioned or called by name
         return False, ""
     
     return False, ""
@@ -99,8 +148,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 - Найти самых активных пользователей
 
 Как обратиться:
-1. Упомяните меня (@имя_бота) с вашим запросом - я отвечаю только при явном упоминании
+1. Упомяните меня (@имя_бота) с вашим запросом
 2. Ответьте на мое сообщение с вашим запросом
+3. Назовите меня по имени: "Альфред, [ваш запрос]" (например, "Альфред, назови число от 1 до 1000")
 
 Я буду вежливо спрашивать подтверждение перед выполнением любой команды, как и подобает хорошему помощнику."""
     
