@@ -15,39 +15,53 @@ class ChatGPTClient:
     
     def analyze_message(self, user_message: str, available_commands: list) -> dict:
         """
-        Analyze user message and determine if it matches any commands.
+        Analyze user message and return probabilities for each command.
         
         Args:
             user_message: The user's message
             available_commands: List of available command names and descriptions
             
         Returns:
-            dict with 'command' (command name or None) and 'reasoning' (explanation)
+            dict with 'commands' (list of commands with probabilities) and 'reasoning' (explanation)
         """
         commands_context = "\n".join([
             f"- {cmd['name']}: {cmd['description']}"
             for cmd in available_commands
         ])
         
-        prompt = f"""Available commands:
+        prompt = f"""Доступные команды:
 {commands_context}
 
-User message: "{user_message}"
+Сообщение пользователя: "{user_message}"
 
-Analyze the user's message and determine:
-1. Does it match any of the available commands?
-2. If yes, which command and what parameters are needed?
-3. If no, set command to null.
+Проанализируйте сообщение пользователя и определите вероятность (от 0 до 100) того, что пользователь хочет выполнить каждую из доступных команд.
 
-IMPORTANT: Only return a command if you are CERTAIN it matches one of the available commands. 
-If the user's request doesn't clearly match any command, return null for the command field.
+Для каждой команды укажите:
+- Вероятность (0-100), что пользователь хочет выполнить эту команду
+- Параметры, если они нужны
+- Краткое обоснование
 
-Respond in JSON format:
+ВАЖНО: Вероятность должна отражать уверенность в том, что пользователь хочет выполнить именно эту команду.
+- 0-30%: Маловероятно, что пользователь хочет эту команду
+- 31-60%: Возможно, пользователь хочет эту команду
+- 61-80%: Вероятно, пользователь хочет эту команду
+- 81-100%: Очень вероятно, что пользователь хочет эту команду
+
+Отвечайте в формате JSON:
 {{
-    "command": "command_name or null",
-    "parameters": {{"param1": "value1"}},
-    "reasoning": "brief explanation"
-}}"""
+    "commands": [
+        {{
+            "name": "command_name",
+            "probability": <число от 0 до 100>,
+            "parameters": {{"param1": "value1"}},
+            "reasoning": "краткое обоснование"
+        }},
+        ...
+    ],
+    "reasoning": "общее объяснение анализа"
+}}
+
+Включите все доступные команды в список, даже если вероятность низкая."""
         
         try:
             response = self.client.chat.completions.create(
@@ -62,13 +76,37 @@ Respond in JSON format:
             
             import json
             result = json.loads(response.choices[0].message.content)
+            
+            # Ensure all commands are included with probabilities
+            commands_with_probs = result.get("commands", [])
+            
+            # Add any missing commands with 0 probability
+            existing_names = {cmd.get("name") for cmd in commands_with_probs}
+            for cmd_info in available_commands:
+                if cmd_info["name"] not in existing_names:
+                    commands_with_probs.append({
+                        "name": cmd_info["name"],
+                        "probability": 0,
+                        "parameters": {},
+                        "reasoning": "Команда не соответствует запросу"
+                    })
+            
+            result["commands"] = commands_with_probs
             return result
             
         except Exception as e:
+            # Fallback: return all commands with 0 probability
             return {
-                "command": None,
-                "parameters": {},
-                "reasoning": f"Error analyzing message: {str(e)}"
+                "commands": [
+                    {
+                        "name": cmd["name"],
+                        "probability": 0,
+                        "parameters": {},
+                        "reasoning": f"Ошибка анализа: {str(e)}"
+                    }
+                    for cmd in available_commands
+                ],
+                "reasoning": f"Ошибка при анализе сообщения: {str(e)}"
             }
     
     def generate_clarification(self, user_message: str, available_commands: list) -> str:
@@ -101,7 +139,7 @@ Respond in JSON format:
                 temperature=0.7
             )
             return response.choices[0].message.content
-        except Exception as e:
+        except Exception:
             return "Прошу прощения, сэр/мадам, но я не смог понять ваш запрос. Будьте так любезны, попробуйте переформулировать его или упомяните одну из доступных команд."
     
     def extract_time_window(self, user_message: str) -> dict:

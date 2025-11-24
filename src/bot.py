@@ -10,7 +10,10 @@ import asyncio
 from aiohttp import web
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from config import TELEGRAM_BOT_TOKEN, WEBHOOK_URL, WEBHOOK_PORT, WEBHOOK_PATH, WEBHOOK_SECRET_TOKEN
+from config import (
+    TELEGRAM_BOT_TOKEN, WEBHOOK_URL, WEBHOOK_PORT, WEBHOOK_PATH, WEBHOOK_SECRET_TOKEN,
+    COMMAND_PROBABILITY_HIGH_THRESHOLD, COMMAND_PROBABILITY_LOW_THRESHOLD
+)
 from chatgpt_client import ChatGPTClient
 from command_handler import CommandHandler as BotCommandHandler
 from message_storage import message_storage
@@ -190,12 +193,113 @@ async def silence(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif update.channel_post:
         await update.channel_post.reply_text(response)
 
+async def execute_command_directly(
+    command_name: str,
+    parameters: dict,
+    message_obj,
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int
+) -> None:
+    """
+    Execute a command directly without asking for confirmation.
+    
+    Args:
+        command_name: Name of the command to execute
+        parameters: Command parameters
+        message_obj: Telegram message object to reply to
+        context: Bot context
+        chat_id: Chat ID
+    """
+    logger.info(f"Executing command directly: {command_name} with parameters: {parameters}")
+    
+    bot = context.bot
+    user_id = message_obj.from_user.id if message_obj.from_user else None
+    
+    # Execute the command
+    response = await command_handler.execute_command(
+        command_name, parameters, bot=bot, chat_id=chat_id, user_id=user_id
+    )
+    
+    # Reply to user
+    await message_obj.reply_text(response)
+
+
 async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle confirmation responses (yes/no) from users."""
+    """Handle confirmation responses (yes/no) or numeric choice selection from users."""
     if not update.message or not update.message.text:
-        return
+        return False
     
     user_message = update.message.text.lower().strip()
+    
+    # Check if there's a pending choice (numeric selection)
+    pending_choice = context.user_data.get("pending_choice")
+    if pending_choice:
+        # Check if this is a reply to bot's message
+        if not is_reply_to_bot(update, context):
+            # If there's a pending choice but not a reply, might be a new request
+            del context.user_data["pending_choice"]
+            return False
+        
+        # Try to parse as number
+        try:
+            choice_num = int(user_message.strip())
+            commands = pending_choice.get("commands", [])
+            parameters_list = pending_choice.get("parameters", [])
+            
+            if 1 <= choice_num <= len(commands):
+                # Valid choice - execute the selected command
+                command_name = commands[choice_num - 1]
+                parameters = parameters_list[choice_num - 1] if choice_num <= len(parameters_list) else {}
+                
+                logger.info(f"User selected command {choice_num}: {command_name} with parameters: {parameters}")
+                
+                # Clear pending choice
+                del context.user_data["pending_choice"]
+                
+                # Handle special case for most_active_user
+                if command_name == "most_active_user":
+                    # Extract time window from the original message or use provided parameters
+                    if "time_window_hours" not in parameters:
+                        # Try to extract from the current message
+                        time_window_result = chatgpt.extract_time_window(update.message.text)
+                        if time_window_result.get("success") and time_window_result.get("time_window_hours"):
+                            parameters["time_window_hours"] = time_window_result["time_window_hours"]
+                        else:
+                            # Ask for time window
+                            context.user_data["pending_time_window"] = {
+                                "command": command_name,
+                                "attempt": 1
+                            }
+                            await update.message.reply_text(
+                                "Понял вас, сэр/мадам. Вы желаете найти самых активных пользователей, однако мне требуется временной период.\n\n"
+                                "Будьте так любезны, укажите временной период (например, 'за последний день', 'за последние 3 часа', 'за прошлую неделю'). "
+                                "Максимально допустимый период составляет одну неделю."
+                            )
+                            return True
+                
+                # Execute the command
+                bot = context.bot
+                chat_id = update.message.chat.id
+                user_id = update.message.from_user.id if update.message.from_user else None
+                
+                response = await command_handler.execute_command(
+                    command_name, parameters, bot=bot, chat_id=chat_id, user_id=user_id
+                )
+                
+                await update.message.reply_text(response)
+                return True
+            else:
+                # Invalid choice number
+                await update.message.reply_text(
+                    f"Прошу прощения, сэр/мадам, но номер {choice_num} не соответствует ни одной из предложенных команд. "
+                    f"Пожалуйста, выберите число от 1 до {len(commands)}."
+                )
+                return True
+        except ValueError:
+            # Not a number - treat as decline or new request
+            del context.user_data["pending_choice"]
+            await update.message.reply_text("Как вам будет угодно, сэр/мадам. Выбор отменен. Я готов к вашим дальнейшим распоряжениям.")
+            return True
     
     # Check if there's a pending command confirmation
     pending_command = context.user_data.get("pending_command")
@@ -298,8 +402,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check if bot is silenced in this chat
     is_silenced = silence_state.is_silenced(chat_id)
     
-    # Check if this is a confirmation response first (needs to work even when silenced)
-    if context.user_data.get("pending_command"):
+    # Check if this is a confirmation response or choice selection first (needs to work even when silenced)
+    if context.user_data.get("pending_command") or context.user_data.get("pending_choice"):
         handled = await handle_confirmation(update, context)
         if handled:
             return
@@ -436,86 +540,102 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Get available commands
     available_commands = command_handler.get_available_commands()
     
-    # Analyze message with ChatGPT
+    # Analyze message with ChatGPT to get probabilities for each command
     analysis = chatgpt.analyze_message(user_message, available_commands)
     
     logger.info(f"ChatGPT analysis: {analysis}")
     
-    # Check if a command was identified
-    command_name = analysis.get("command")
-    # Handle case where JSON returns string "null" instead of actual null
-    if command_name in [None, "null", ""]:
-        command_name = None
+    # Extract commands with probabilities
+    commands_with_probs = analysis.get("commands", [])
     
-    if command_name and command_name in command_handler.commands:
-        # Command found - handle special case for most_active_user
-        if command_name == "most_active_user":
-            # Extract time window from the message
-            time_window_result = chatgpt.extract_time_window(user_message)
-            
-            if time_window_result.get("success") and time_window_result.get("time_window_hours"):
-                # Time window extracted successfully
-                parameters = {"time_window_hours": time_window_result["time_window_hours"]}
-                reasoning = time_window_result.get("reasoning", "")
-                
-                # Store pending command
-                context.user_data["pending_command"] = {
-                    "command": command_name,
-                    "parameters": parameters
-                }
-                
-                # Get command description for confirmation message
-                cmd_info = next((c for c in available_commands if c["name"] == command_name), None)
-                cmd_description = cmd_info["description"] if cmd_info else command_name
-                
-                time_window_hours = parameters["time_window_hours"]
-                confirmation_message = f"Понял вас, сэр/мадам. Вы желаете выполнить: **{cmd_description}**\n\n"
-                confirmation_message += f"Временной период: {time_window_hours} часов\n\n"
-                if reasoning:
-                    confirmation_message += f"Мое понимание: {reasoning}\n\n"
-                confirmation_message += "Верно ли я вас понял? Пожалуйста, подтвердите, ответив 'да'."
-                
-                await message_obj.reply_text(confirmation_message, parse_mode="Markdown")
-            else:
-                # Time window extraction failed - ask user for time window
-                context.user_data["pending_time_window"] = {
-                    "command": command_name,
-                    "attempt": 1
-                }
-                await message_obj.reply_text(
-                    "Понял вас, сэр/мадам. Вы желаете найти самых активных пользователей, однако я не смог определить временной период из вашего сообщения.\n\n"
-                    "Будьте так любезны, укажите временной период (например, 'за последний день', 'за последние 3 часа', 'за прошлую неделю'). "
-                    "Максимально допустимый период составляет одну неделю."
-                )
-        else:
-            # Regular command - ask for confirmation
-            parameters = analysis.get("parameters", {})
-            reasoning = analysis.get("reasoning", "")
-            
-            # Store pending command
-            context.user_data["pending_command"] = {
-                "command": command_name,
-                "parameters": parameters
-            }
-            
-            # Get command description for confirmation message
-            cmd_info = next((c for c in available_commands if c["name"] == command_name), None)
-            cmd_description = cmd_info["description"] if cmd_info else command_name
-            
-            confirmation_message = f"Понял вас, сэр/мадам. Вы желаете выполнить: **{cmd_description}**\n\n"
-            if parameters:
-                confirmation_message += f"Параметры: {parameters}\n\n"
-            if reasoning:
-                confirmation_message += f"Мое понимание: {reasoning}\n\n"
-            confirmation_message += "Верно ли я вас понял? Пожалуйста, подтвердите, ответив 'да'."
-            
-            # Reply to user's message asking for confirmation
-            await message_obj.reply_text(confirmation_message, parse_mode="Markdown")
-    else:
-        # No command found - ask for clarification
-        clarification_message = chatgpt.generate_clarification(user_message, available_commands)
+    # Filter and sort commands by probability
+    high_threshold_commands = [
+        cmd for cmd in commands_with_probs
+        if cmd.get("probability", 0) >= COMMAND_PROBABILITY_HIGH_THRESHOLD
+    ]
+    low_threshold_commands = [
+        cmd for cmd in commands_with_probs
+        if cmd.get("probability", 0) >= COMMAND_PROBABILITY_LOW_THRESHOLD
+    ]
+    
+    # Sort by probability (descending)
+    high_threshold_commands.sort(key=lambda x: x.get("probability", 0), reverse=True)
+    low_threshold_commands.sort(key=lambda x: x.get("probability", 0), reverse=True)
+    
+    # Case 1: Single command with high probability - execute directly
+    if len(high_threshold_commands) == 1:
+        cmd_data = high_threshold_commands[0]
+        command_name = cmd_data.get("name")
         
-        # Reply to user's message asking for clarification
+        if command_name and command_name in command_handler.commands:
+            # Handle special case for most_active_user
+            if command_name == "most_active_user":
+                # Extract time window from the message
+                time_window_result = chatgpt.extract_time_window(user_message)
+                
+                if time_window_result.get("success") and time_window_result.get("time_window_hours"):
+                    # Time window extracted successfully - execute directly
+                    parameters = {"time_window_hours": time_window_result["time_window_hours"]}
+                    await execute_command_directly(
+                        command_name, parameters, message_obj, context, chat_id
+                    )
+                else:
+                    # Time window extraction failed - ask user for time window
+                    context.user_data["pending_time_window"] = {
+                        "command": command_name,
+                        "attempt": 1
+                    }
+                    await message_obj.reply_text(
+                        "Понял вас, сэр/мадам. Вы желаете найти самых активных пользователей, однако я не смог определить временной период из вашего сообщения.\n\n"
+                        "Будьте так любезны, укажите временной период (например, 'за последний день', 'за последние 3 часа', 'за прошлую неделю'). "
+                        "Максимально допустимый период составляет одну неделю."
+                    )
+            else:
+                # Regular command - execute directly
+                parameters = cmd_data.get("parameters", {})
+                await execute_command_directly(
+                    command_name, parameters, message_obj, context, chat_id
+                )
+    
+    # Case 2: Multiple commands with high probability - ask user to choose
+    elif len(high_threshold_commands) > 1:
+        cmd_list = "\n".join([
+            f"{i+1}. {cmd.get('name')} (вероятность: {cmd.get('probability', 0):.0f}%)"
+            for i, cmd in enumerate(high_threshold_commands)
+        ])
+        
+        context.user_data["pending_choice"] = {
+            "commands": [cmd.get("name") for cmd in high_threshold_commands],
+            "parameters": [cmd.get("parameters", {}) for cmd in high_threshold_commands]
+        }
+        
+        await message_obj.reply_text(
+            f"Понял вас, сэр/мадам. Я определил несколько команд, которые могут соответствовать вашему запросу:\n\n"
+            f"{cmd_list}\n\n"
+            f"Будьте так любезны, укажите номер команды, которую вы желаете выполнить."
+        )
+    
+    # Case 3: No high probability commands, but some with low probability - ask user to choose
+    elif len(low_threshold_commands) > 0:
+        cmd_list = "\n".join([
+            f"{i+1}. {cmd.get('name')} (вероятность: {cmd.get('probability', 0):.0f}%)"
+            for i, cmd in enumerate(low_threshold_commands)
+        ])
+        
+        context.user_data["pending_choice"] = {
+            "commands": [cmd.get("name") for cmd in low_threshold_commands],
+            "parameters": [cmd.get("parameters", {}) for cmd in low_threshold_commands]
+        }
+        
+        await message_obj.reply_text(
+            f"Понял вас, сэр/мадам. Я определил несколько возможных команд, которые могут соответствовать вашему запросу:\n\n"
+            f"{cmd_list}\n\n"
+            f"Будьте так любезны, укажите номер команды, которую вы желаете выполнить, или уточните ваш запрос."
+        )
+    
+    # Case 4: No commands reached low threshold - ask for clarification
+    else:
+        clarification_message = chatgpt.generate_clarification(user_message, available_commands)
         await message_obj.reply_text(clarification_message)
 
 

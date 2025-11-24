@@ -34,7 +34,8 @@ undertable bot/
 - **Channel support**: Works in Telegram channels for all participants
 - **Private chat support**: Also works in one-on-one conversations
 - **Smart interaction**: Users can mention the bot or reply to its messages
-- **Confirmation system**: Bot asks for confirmation before executing commands
+- **Probability-based execution**: Bot uses AI to assess command probability and executes high-confidence commands automatically
+- **Smart confirmation**: Bot only asks for confirmation when multiple commands match or confidence is low
 - **Clarification requests**: Bot asks for clarification when commands are unclear
 
 ## Setup
@@ -70,6 +71,8 @@ The bot is configured for Heroku deployment with automatic webhook setup.
    heroku config:set WEBHOOK_PATH=/webhook
    heroku config:set WEBHOOK_SECRET_TOKEN=your_secret_token  # Optional
    heroku config:set OPENAI_MODEL=gpt-4o-mini  # Optional
+   heroku config:set COMMAND_PROBABILITY_HIGH_THRESHOLD=80  # Optional, default: 80 (0-100)
+   heroku config:set COMMAND_PROBABILITY_LOW_THRESHOLD=50  # Optional, default: 50 (0-100)
    ```
 
 3. **Deploy**:
@@ -101,6 +104,8 @@ The bot is configured for Heroku deployment with automatic webhook setup.
      - `WEBHOOK_PATH`: (Optional) Webhook path (default: `/webhook`)
      - `WEBHOOK_SECRET_TOKEN`: (Optional) Secret token for webhook verification
      - `OPENAI_MODEL`: (Optional) Model to use (default: `gpt-4o-mini`)
+     - `COMMAND_PROBABILITY_HIGH_THRESHOLD`: (Optional) High probability threshold for auto-execution (0-100, default: 80)
+     - `COMMAND_PROBABILITY_LOW_THRESHOLD`: (Optional) Low probability threshold for command selection (0-100, default: 50)
 
 3. **Deploy**:
    - Push to `main` branch
@@ -135,6 +140,8 @@ The bot uses webhooks to receive updates from Telegram (instead of long polling)
    - `WEBHOOK_PORT`: Port for the webhook server (default: 8443)
    - `WEBHOOK_PATH`: Path for webhook endpoint (default: `/webhook`)
    - `WEBHOOK_SECRET_TOKEN`: Optional secret token for webhook verification (recommended)
+   - `COMMAND_PROBABILITY_HIGH_THRESHOLD`: (Optional) High probability threshold for auto-execution (0-100, default: 80)
+   - `COMMAND_PROBABILITY_LOW_THRESHOLD`: (Optional) Low probability threshold for command selection (0-100, default: 50)
 
 3. **Example configuration**:
    ```
