@@ -15,6 +15,7 @@ from chatgpt_client import ChatGPTClient
 from command_handler import CommandHandler as BotCommandHandler
 from message_storage import message_storage
 from silence_state import silence_state
+from user_ignore_list import user_ignore_list
 from datetime import datetime
 
 # Enable logging
@@ -168,7 +169,8 @@ async def generate_random_number(update: Update, context: ContextTypes.DEFAULT_T
         if min > max:
             min, max  = max, min
         parameters = {"min": min, "max": max}
-        response = await command_handler.execute_command("random_number", parameters, bot=bot, chat_id=chat_id)
+        user_id = update.message.from_user.id if update.message and update.message.from_user else None
+        response = await command_handler.execute_command("random_number", parameters, bot=bot, chat_id=chat_id, user_id=user_id)
     except Exception as e:
         response = f"Произошла досадная ошибка: ({e})"
 
@@ -180,7 +182,8 @@ async def generate_random_number(update: Update, context: ContextTypes.DEFAULT_T
 async def silence(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot = context.bot
     chat_id = update.message.chat.id
-    response = await command_handler.execute_command("silence", {}, bot=bot, chat_id=chat_id)
+    user_id = update.message.from_user.id if update.message and update.message.from_user else None
+    response = await command_handler.execute_command("silence", {}, bot=bot, chat_id=chat_id, user_id=user_id)
 
     if update.message:
         await update.message.reply_text(response)
@@ -214,12 +217,13 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         logger.info(f"User confirmed command: {command_name} with parameters: {parameters}")
         
-        # Get bot and chat_id for commands that need them
+        # Get bot, chat_id, and user_id for commands that need them
         bot = context.bot
         chat_id = update.message.chat.id
+        user_id = update.message.from_user.id if update.message.from_user else None
         
         # Execute the command
-        response = await command_handler.execute_command(command_name, parameters, bot=bot, chat_id=chat_id)
+        response = await command_handler.execute_command(command_name, parameters, bot=bot, chat_id=chat_id, user_id=user_id)
         
         # Clear pending command
         del context.user_data["pending_command"]
@@ -246,6 +250,50 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     chat_id = message_obj.chat.id
+    user_id = message_obj.from_user.id if message_obj.from_user else None
+    
+    # Check if user is in ignore list (check early, but allow silence_me command to work)
+    if user_id and user_ignore_list.is_ignored(user_id):
+        # First check if it's a confirmation for silence_me command
+        if context.user_data.get("pending_command"):
+            pending_cmd = context.user_data["pending_command"]
+            if pending_cmd.get("command") == "silence_me":
+                # Allow confirmation to proceed (this will unsilence the user)
+                handled = await handle_confirmation(update, context)
+                if handled:
+                    return
+        
+        # Check if this is a new silence_me request
+        should_process, user_message = should_process_message(update, context)
+        if should_process and user_message:
+            # Check if it's a silence_me request
+            available_commands = command_handler.get_available_commands()
+            analysis = chatgpt.analyze_message(user_message, available_commands)
+            command_name = analysis.get("command")
+            
+            # Only process silence_me command when user is ignored (to allow canceling ignore)
+            if command_name == "silence_me":
+                # Process silence_me command normally (it will toggle the ignore state)
+                parameters = analysis.get("parameters", {})
+                reasoning = analysis.get("reasoning", "")
+                
+                # Store pending command
+                context.user_data["pending_command"] = {
+                    "command": command_name,
+                    "parameters": parameters
+                }
+                
+                confirmation_message = "Понял вас, сэр/мадам. Вы желаете изменить статус игнорирования.\n\n"
+                if reasoning:
+                    confirmation_message += f"Мое понимание: {reasoning}\n\n"
+                confirmation_message += "Верно ли я вас понял? Пожалуйста, подтвердите, ответив 'да'."
+                
+                await message_obj.reply_text(confirmation_message, parse_mode="Markdown")
+                return
+        
+        # User is ignored and it's not a silence_me command - ignore completely
+        logger.info(f"User {user_id} is in ignore list, ignoring message")
+        return
     
     # Check if bot is silenced in this chat
     is_silenced = silence_state.is_silenced(chat_id)
@@ -306,20 +354,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                     return
     
-    # Store message for tracking (only if not silenced)
+    # Store message for tracking (only if not silenced and user is not ignored)
     if not is_silenced and message_obj.from_user:
-        try:
-            message_timestamp = datetime.now()
-            if message_obj.date:
-                message_timestamp = message_obj.date
-            message_storage.add_message(
-                chat_id=chat_id,
-                user_id=message_obj.from_user.id,
-                message_id=message_obj.message_id,
-                timestamp=message_timestamp
-            )
-        except Exception as e:
-            logger.debug(f"Could not store message: {e}")
+        # Double-check user is not ignored (safety check)
+        if not user_ignore_list.is_ignored(message_obj.from_user.id):
+            try:
+                message_timestamp = datetime.now()
+                if message_obj.date:
+                    message_timestamp = message_obj.date
+                message_storage.add_message(
+                    chat_id=chat_id,
+                    user_id=message_obj.from_user.id,
+                    message_id=message_obj.message_id,
+                    timestamp=message_timestamp
+                )
+            except Exception as e:
+                logger.debug(f"Could not store message: {e}")
     
     # If silenced, only process silence command or explicit unsilence requests
     if is_silenced:
@@ -361,7 +411,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 elif is_unsilence_request:
                     # Direct unsilence request - execute silence command to toggle
                     bot = context.bot
-                    response = await command_handler.execute_command("silence", {}, bot=bot, chat_id=chat_id)
+                    user_id = message_obj.from_user.id if message_obj.from_user else None
+                    response = await command_handler.execute_command("silence", {}, bot=bot, chat_id=chat_id, user_id=user_id)
                     await message_obj.reply_text(response)
                     return
             

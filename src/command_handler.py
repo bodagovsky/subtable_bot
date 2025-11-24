@@ -8,6 +8,7 @@ from commands.example_commands import (
 )
 from commands.silence_command import SilenceCommand
 from commands.most_active_user import MostActiveUserCommand
+from commands.silence_me_command import SilenceMeCommand
 
 
 class CommandHandler:
@@ -25,6 +26,7 @@ class CommandHandler:
             EchoCommand(),
             MostActiveUserCommand(),
             SilenceCommand(),
+            SilenceMeCommand(),
         ]
         for cmd in default_commands:
             self.register_command(cmd)
@@ -37,7 +39,7 @@ class CommandHandler:
         """Get list of available commands with descriptions."""
         return [cmd.get_info() for cmd in self.commands.values()]
     
-    async def execute_command(self, command_name: str, parameters: dict = None, bot=None, chat_id: int = None) -> str:
+    async def execute_command(self, command_name: str, parameters: dict = None, bot=None, chat_id: int = None, user_id: int = None) -> str:
         """
         Execute a command by name.
         
@@ -46,6 +48,7 @@ class CommandHandler:
             parameters: Parameters for the command
             bot: Optional bot instance (for commands that need it)
             chat_id: Optional chat ID (for commands that need it)
+            user_id: Optional user ID (for commands that need it)
             
         Returns:
             Response message
@@ -55,11 +58,19 @@ class CommandHandler:
         
         try:
             command = self.commands[command_name]
-            # Check if command needs bot/chat_id (has execute signature with these params)
+            # Check if command needs bot/chat_id/user_id (has execute signature with these params)
             import inspect
             sig = inspect.signature(command.execute)
-            if 'bot' in sig.parameters or 'chat_id' in sig.parameters:
-                return await command.execute(parameters, bot=bot, chat_id=chat_id)
+            params_to_pass = {}
+            if 'bot' in sig.parameters:
+                params_to_pass['bot'] = bot
+            if 'chat_id' in sig.parameters:
+                params_to_pass['chat_id'] = chat_id
+            if 'user_id' in sig.parameters:
+                params_to_pass['user_id'] = user_id
+            
+            if params_to_pass:
+                return await command.execute(parameters, **params_to_pass)
             else:
                 return await command.execute(parameters)
         except Exception as e:
