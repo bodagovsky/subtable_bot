@@ -3,9 +3,6 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from collections import defaultdict
 import logging
-import pytz
-
-utc=pytz.UTC
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +45,7 @@ class MessageStorage:
         # Count messages per user
         user_counts = defaultdict(int)
         for timestamp, user_id, _ in self.messages[chat_id]:
-            if timestamp >= utc.localize(cutoff_time):
+            if timestamp >= cutoff_time:
                 user_counts[user_id] += 1
         
         return dict(user_counts)
@@ -61,7 +58,7 @@ class MessageStorage:
         cutoff_time = datetime.now() - timedelta(days=self.max_age_days)
         self.messages[chat_id] = [
             (ts, uid, mid) for ts, uid, mid in self.messages[chat_id]
-            if ts >= utc.localize(cutoff_time)
+            if ts >= cutoff_time
         ]
 
 

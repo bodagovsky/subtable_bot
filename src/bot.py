@@ -130,7 +130,7 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
         return False
     
     # Check if user confirmed
-    if user_message in ["yes", "y", "да", "ok", "okay", "confirm", "execute", "верно", "ага"]:
+    if user_message in ["yes", "y", "да", "ok", "okay", "confirm", "execute", "верно", "ага", "так точно", "ес", "йеп"]:
         # Execute the pending command
         command_name = pending_command["command"]
         parameters = pending_command.get("parameters", {})
@@ -142,7 +142,7 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
         chat_id = update.message.chat.id
         
         # Execute the command
-        response = command_handler.execute_command(command_name, parameters, bot=bot, chat_id=chat_id)
+        response = await command_handler.execute_command(command_name, parameters, bot=bot, chat_id=chat_id)
         
         # Clear pending command
         del context.user_data["pending_command"]
@@ -167,7 +167,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_obj = update.message if update.message else update.channel_post
     if message_obj and message_obj.from_user and message_obj.chat:
         try:
-            message_timestamp = datetime.utcnow()
+            message_timestamp = datetime.now()
             if message_obj.date:
                 message_timestamp = message_obj.date
             message_storage.add_message(

@@ -35,7 +35,7 @@ class CommandHandler:
         """Get list of available commands with descriptions."""
         return [cmd.get_info() for cmd in self.commands.values()]
     
-    def execute_command(self, command_name: str, parameters: dict = None, bot=None, chat_id: int = None) -> str:
+    async def execute_command(self, command_name: str, parameters: dict = None, bot=None, chat_id: int = None) -> str:
         """
         Execute a command by name.
         
@@ -57,9 +57,9 @@ class CommandHandler:
             import inspect
             sig = inspect.signature(command.execute)
             if 'bot' in sig.parameters or 'chat_id' in sig.parameters:
-                return command.execute(parameters, bot=bot, chat_id=chat_id)
+                return await command.execute(parameters, bot=bot, chat_id=chat_id)
             else:
-                return command.execute(parameters)
+                return await command.execute(parameters)
         except Exception as e:
             return f"Прошу прощения, сэр/мадам, но произошла ошибка при выполнении команды: {str(e)}"
 

@@ -13,7 +13,7 @@ class TimeCommand(BaseCommand):
             description="Получить текущую дату и время"
         )
     
-    def execute(self, parameters: dict = None) -> str:
+    async def execute(self, parameters: dict = None) -> str:
         now = datetime.now()
         return f"К вашим услугам, сэр/мадам. Текущее время: {now.strftime('%Y-%m-%d %H:%M:%S')}"
 
@@ -27,7 +27,7 @@ class RandomNumberCommand(BaseCommand):
             description="Сгенерировать случайное число между min и max (по умолчанию: 1-100)"
         )
     
-    def execute(self, parameters: dict = None) -> str:
+    async def execute(self, parameters: dict = None) -> str:
         params = parameters or {}
         min_val = int(params.get("min", 1))
         max_val = int(params.get("max", 100))
@@ -44,7 +44,7 @@ class EchoCommand(BaseCommand):
             description="Повторить сообщение или текст"
         )
     
-    def execute(self, parameters: dict = None) -> str:
+    async def execute(self, parameters: dict = None) -> str:
         params = parameters or {}
         message = params.get("message", "Сообщение не предоставлено")
         return f"Конечно, сэр/мадам. Эхо: {message}"

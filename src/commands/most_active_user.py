@@ -21,7 +21,7 @@ class MostActiveUserCommand(BaseCommand):
             description="Найти топ-3 самых активных пользователей в чате за указанный временной период (максимум 1 неделя)"
         )
     
-    def execute(self, parameters: dict = None, bot: Optional[Bot] = None, chat_id: Optional[int] = None) -> str:
+    async def execute(self, parameters: dict = None, bot: Optional[Bot] = None, chat_id: Optional[int] = None) -> str:
         """
         Execute the command.
         
@@ -77,7 +77,7 @@ class MostActiveUserCommand(BaseCommand):
                 try:
                     # Get user info using bot API
                     # Note: This is a synchronous call in python-telegram-bot
-                    chat_member = bot.get_chat_member(chat_id, user_id)
+                    chat_member = await bot.get_chat_member(chat_id, user_id)
                     user = chat_member.user
                     user_name = user.first_name or "Неизвестно"
                     if user.last_name:
