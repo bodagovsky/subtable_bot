@@ -6,6 +6,7 @@ from commands.example_commands import (
     RandomNumberCommand,
     EchoCommand
 )
+from commands.silence_command import SilenceCommand
 from commands.most_active_user import MostActiveUserCommand
 
 
@@ -22,7 +23,8 @@ class CommandHandler:
             TimeCommand(),
             RandomNumberCommand(),
             EchoCommand(),
-            MostActiveUserCommand()
+            MostActiveUserCommand(),
+            SilenceCommand(),
         ]
         for cmd in default_commands:
             self.register_command(cmd)

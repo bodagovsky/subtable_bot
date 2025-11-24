@@ -14,6 +14,7 @@ from config import TELEGRAM_BOT_TOKEN, WEBHOOK_URL, WEBHOOK_PORT, WEBHOOK_PATH, 
 from chatgpt_client import ChatGPTClient
 from command_handler import CommandHandler as BotCommandHandler
 from message_storage import message_storage
+from silence_state import silence_state
 from datetime import datetime
 
 # Enable logging
@@ -109,6 +110,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif update.channel_post:
         await update.channel_post.reply_text(welcome_message)
 
+async def generate_random_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    bot = context.bot
+    chat_id = update.message.chat.id
+    try:
+        min, max = map(int, update.message.text.split()[1:])
+        if min > max:
+            min, max  = max, min
+        parameters = {"min": min, "max": max}
+        response = await command_handler.execute_command("random_number", parameters, bot=bot, chat_id=chat_id)
+    except Exception as e:
+        response = f"Произошла досадная ошибка: ({e})"
+
+    if update.message:
+        await update.message.reply_text(response)
+    elif update.channel_post:
+        await update.channel_post.reply_text(response)
+
+async def silence(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    bot = context.bot
+    chat_id = update.message.chat.id
+    response = await command_handler.execute_command("silence", {}, bot=bot, chat_id=chat_id)
+
+    if update.message:
+        await update.message.reply_text(response)
+    elif update.channel_post:
+        await update.channel_post.reply_text(response)
 
 async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle confirmation responses (yes/no) from users."""
@@ -163,23 +190,23 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming text messages."""
-    # Store message for tracking (if it's a regular message)
+    # Determine which message object to use
     message_obj = update.message if update.message else update.channel_post
-    if message_obj and message_obj.from_user and message_obj.chat:
-        try:
-            message_timestamp = datetime.now()
-            if message_obj.date:
-                message_timestamp = message_obj.date
-            message_storage.add_message(
-                chat_id=message_obj.chat.id,
-                user_id=message_obj.from_user.id,
-                message_id=message_obj.message_id,
-                timestamp=message_timestamp
-            )
-        except Exception as e:
-            logger.debug(f"Could not store message: {e}")
+    if not message_obj or not message_obj.chat:
+        return
     
-    # Check if this is a time window extraction retry
+    chat_id = message_obj.chat.id
+    
+    # Check if bot is silenced in this chat
+    is_silenced = silence_state.is_silenced(chat_id)
+    
+    # Check if this is a confirmation response first (needs to work even when silenced)
+    if context.user_data.get("pending_command"):
+        handled = await handle_confirmation(update, context)
+        if handled:
+            return
+    
+    # Check if this is a time window extraction retry (needs to work even when silenced)
     if context.user_data.get("pending_time_window"):
         pending_tw = context.user_data["pending_time_window"]
         command_name = pending_tw["command"]
@@ -229,10 +256,67 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                     return
     
-    # Check if this is a confirmation response
-    if context.user_data.get("pending_command"):
-        handled = await handle_confirmation(update, context)
-        if handled:
+    # Store message for tracking (only if not silenced)
+    if not is_silenced and message_obj.from_user:
+        try:
+            message_timestamp = datetime.now()
+            if message_obj.date:
+                message_timestamp = message_obj.date
+            message_storage.add_message(
+                chat_id=chat_id,
+                user_id=message_obj.from_user.id,
+                message_id=message_obj.message_id,
+                timestamp=message_timestamp
+            )
+        except Exception as e:
+            logger.debug(f"Could not store message: {e}")
+    
+    # If silenced, only process silence command or explicit unsilence requests
+    if is_silenced:
+        # Check if message should be processed (mention or reply)
+        should_process, user_message = should_process_message(update, context)
+        
+        if should_process and user_message:
+            # Check if this is an unsilence request
+            user_message_lower = user_message.lower()
+            unsilence_keywords = ["unsilence", "wake up", "проснись", "просыпайся", "слушай", "отвечай", "вернись", "вернись к работе"]
+            
+            is_unsilence_request = any(keyword in user_message_lower for keyword in unsilence_keywords)
+            
+            # Get available commands to check for silence command
+            available_commands = command_handler.get_available_commands()
+            analysis = chatgpt.analyze_message(user_message, available_commands)
+            command_name = analysis.get("command")
+            
+            # Only process if it's the silence command or explicit unsilence request
+            if command_name == "silence" or is_unsilence_request:
+                # Process silence command normally (it will toggle the state)
+                if command_name == "silence":
+                    parameters = analysis.get("parameters", {})
+                    reasoning = analysis.get("reasoning", "")
+                    
+                    # Store pending command
+                    context.user_data["pending_command"] = {
+                        "command": command_name,
+                        "parameters": parameters
+                    }
+                    
+                    confirmation_message = "Понял вас, сэр/мадам. Вы желаете изменить режим тишины.\n\n"
+                    if reasoning:
+                        confirmation_message += f"Мое понимание: {reasoning}\n\n"
+                    confirmation_message += "Верно ли я вас понял? Пожалуйста, подтвердите, ответив 'да'."
+                    
+                    await message_obj.reply_text(confirmation_message, parse_mode="Markdown")
+                    return
+                elif is_unsilence_request:
+                    # Direct unsilence request - execute silence command to toggle
+                    bot = context.bot
+                    response = await command_handler.execute_command("silence", {}, bot=bot, chat_id=chat_id)
+                    await message_obj.reply_text(response)
+                    return
+            
+            # If silenced and not a silence/unsilence request, ignore the message
+            logger.info(f"Bot is silenced in chat {chat_id}, ignoring message")
             return
     
     # Check if message should be processed (mention or reply)
@@ -390,6 +474,8 @@ async def create_app() -> web.Application:
     
     # Register handlers
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("random_number", generate_random_number))
+    application.add_handler(CommandHandler("silence", silence))
     
     # Handle all text messages (private chats, groups, channels)
     # The handler will check for mentions and replies internally
