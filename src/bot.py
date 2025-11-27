@@ -199,7 +199,7 @@ async def execute_command_directly(
     message_obj,
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int
-) -> None:
+) -> bool:
     """
     Execute a command directly without asking for confirmation.
     
@@ -209,8 +209,19 @@ async def execute_command_directly(
         message_obj: Telegram message object to reply to
         context: Bot context
         chat_id: Chat ID
+        
+    Returns:
+        True if command was executed successfully, False if validation failed
     """
     logger.info(f"Executing command directly: {command_name} with parameters: {parameters}")
+    
+    # Validate parameters before execution
+    is_valid, error_message = command_handler.validate_command(command_name, parameters)
+    if not is_valid:
+        # Ask user to clarify invalid parameters
+        clarification = f"Прошу прощения, сэр/мадам. {error_message}"
+        await message_obj.reply_text(clarification)
+        return False
     
     bot = context.bot
     user_id = message_obj.from_user.id if message_obj.from_user else None
@@ -222,6 +233,7 @@ async def execute_command_directly(
     
     # Reply to user
     await message_obj.reply_text(response)
+    return True
 
 
 async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -277,6 +289,14 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
                             )
                             return True
                 
+                # Validate parameters before execution
+                is_valid, error_message = command_handler.validate_command(command_name, parameters)
+                if not is_valid:
+                    # Ask user to clarify invalid parameters
+                    clarification = f"Прошу прощения, сэр/мадам. {error_message}"
+                    await update.message.reply_text(clarification)
+                    return True
+                
                 # Execute the command
                 bot = context.bot
                 chat_id = update.message.chat.id
@@ -320,6 +340,15 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
         parameters = pending_command.get("parameters", {})
         
         logger.info(f"User confirmed command: {command_name} with parameters: {parameters}")
+        
+        # Validate parameters before execution
+        is_valid, error_message = command_handler.validate_command(command_name, parameters)
+        if not is_valid:
+            # Ask user to clarify invalid parameters
+            clarification = f"Прошу прощения, сэр/мадам. {error_message}"
+            await update.message.reply_text(clarification)
+            # Keep pending command so user can provide corrected parameters
+            return True
         
         # Get bot, chat_id, and user_id for commands that need them
         bot = context.bot
