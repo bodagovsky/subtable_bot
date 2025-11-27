@@ -18,7 +18,7 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 # Bot Configuration
 COMMAND_PREFIX = os.getenv("COMMAND_PREFIX", "/")
-COMMAND_PROBABILITY_HIGH_THRESHOLD = float(os.getenv("COMMAND_PROBABILITY_HIGH_THRESHOLD", "80"))  # 0-100, default 80%
+COMMAND_PROBABILITY_HIGH_THRESHOLD = float(os.getenv("COMMAND_PROBABILITY_HIGH_THRESHOLD", "95"))  # 0-100, default 95%
 COMMAND_PROBABILITY_LOW_THRESHOLD = float(os.getenv("COMMAND_PROBABILITY_LOW_THRESHOLD", "50"))  # 0-100, default 50%
 SYSTEM_PROMPT = """Вы Альфред, вежливый и профессиональный помощник-бот для Telegram, стилизованный под дворецкого из серии о Бэтмене. Вы обращаетесь к пользователям формально, используя "сэр/мадам", и всегда вежливы и профессиональны. Вы можете выполнять команды на основе запросов пользователей. Когда пользователь просит вас выполнить действие, проанализируйте его запрос и определите, соответствует ли он какой-либо из доступных команд. Доступные команды будут предоставлены в контексте. Отвечайте на русском языке в стиле Альфреда - формально, вежливо и профессионально."""
 

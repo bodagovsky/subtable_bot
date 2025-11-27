@@ -356,7 +356,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = message_obj.chat.id
     user_id = message_obj.from_user.id if message_obj.from_user else None
     
-    # Check if user is in ignore list (check early, but allow silence_me command to work)
+    # Check if user is in ignore list (check early, but allow unsilence requests to work)
     if user_id and user_ignore_list.is_ignored(user_id):
         # First check if it's a confirmation for silence_me command
         if context.user_data.get("pending_command"):
@@ -367,35 +367,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if handled:
                     return
         
-        # Check if this is a new silence_me request
+        # Check if this is a new unsilence request
         should_process, user_message = should_process_message(update, context)
         if should_process and user_message:
-            # Check if it's a silence_me request
+            # Check for explicit unsilence keywords first
+            user_message_lower = user_message.lower()
+            unsilence_keywords = [
+                "stop ignoring me", "stop ignoring", "don't ignore me", "don't ignore",
+                "не игнорируй меня", "перестань игнорировать", "не игнорируй", 
+                "отмени игнорирование", "прекрати игнорировать"
+            ]
+            is_unsilence_request = any(keyword in user_message_lower for keyword in unsilence_keywords)
+            
+            # Also check if it's a silence_me command via probability analysis
             available_commands = command_handler.get_available_commands()
             analysis = chatgpt.analyze_message(user_message, available_commands)
-            command_name = analysis.get("command")
+            commands_with_probs = analysis.get("commands", [])
             
-            # Only process silence_me command when user is ignored (to allow canceling ignore)
-            if command_name == "silence_me":
-                # Process silence_me command normally (it will toggle the ignore state)
-                parameters = analysis.get("parameters", {})
-                reasoning = analysis.get("reasoning", "")
-                
-                # Store pending command
-                context.user_data["pending_command"] = {
-                    "command": command_name,
-                    "parameters": parameters
-                }
-                
-                confirmation_message = "Понял вас, сэр/мадам. Вы желаете изменить статус игнорирования.\n\n"
-                if reasoning:
-                    confirmation_message += f"Мое понимание: {reasoning}\n\n"
-                confirmation_message += "Верно ли я вас понял? Пожалуйста, подтвердите, ответив 'да'."
-                
-                await message_obj.reply_text(confirmation_message, parse_mode="Markdown")
+            # Find silence_me command in the results
+            silence_me_cmd = None
+            for cmd in commands_with_probs:
+                if cmd.get("name") == "silence_me":
+                    silence_me_cmd = cmd
+                    break
+            
+            # Only process if it's an explicit unsilence request OR silence_me with high probability
+            # (high probability means they really want to unsilence, not just saying "ignore me" again)
+            silence_me_prob = silence_me_cmd.get("probability", 0) if silence_me_cmd else 0
+            should_process_unsilence = is_unsilence_request or silence_me_prob >= COMMAND_PROBABILITY_HIGH_THRESHOLD
+            
+            if should_process_unsilence:
+                # Execute silence_me command directly to toggle (will unsilence since user is already ignored)
+                bot = context.bot
+                response = await command_handler.execute_command(
+                    "silence_me", {}, bot=bot, chat_id=chat_id, user_id=user_id
+                )
+                await message_obj.reply_text(response)
                 return
         
-        # User is ignored and it's not a silence_me command - ignore completely
+        # User is ignored and it's not an unsilence request - ignore completely
         logger.info(f"User {user_id} is in ignore list, ignoring message")
         return
     
