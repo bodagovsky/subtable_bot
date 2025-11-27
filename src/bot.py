@@ -672,10 +672,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Будьте так любезны, укажите номер команды, которую вы желаете выполнить, или уточните ваш запрос."
         )
     
-    # Case 4: No commands reached low threshold - ask for clarification
+    # Case 4: No commands reached low threshold - check if it's conversational
     else:
-        clarification_message = chatgpt.generate_clarification(user_message, available_commands)
-        await message_obj.reply_text(clarification_message)
+        # Analyze if the message is a command request or just conversational
+        intent_analysis = chatgpt.analyze_message_intent(user_message)
+        is_command_request = intent_analysis.get("is_command_request", True)
+        should_respond = intent_analysis.get("should_respond", False)
+        intent_type = intent_analysis.get("intent_type", "other")
+        
+        if not is_command_request and should_respond:
+            # It's a meaningful conversational message - generate a polite response
+            response = chatgpt.generate_conversational_response(user_message, intent_type)
+            await message_obj.reply_text(response)
+        else:
+            # It's likely a command request that wasn't understood - ask for clarification
+            clarification_message = chatgpt.generate_clarification(user_message, available_commands)
+            await message_obj.reply_text(clarification_message)
 
 
 
