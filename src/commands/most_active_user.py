@@ -21,6 +21,28 @@ class MostActiveUserCommand(BaseCommand):
             description="Найти топ-3 самых активных пользователей в чате за указанный временной период (максимум 1 неделя)"
         )
     
+    def validate_parameters(self, parameters: dict = None) -> tuple[bool, str | None]:
+        """Validate that time_window_hours is a valid positive number <= 168 hours."""
+        params = parameters or {}
+        time_window_hours = params.get("time_window_hours")
+        
+        if not time_window_hours:
+            return False, "Временной период не был указан. Пожалуйста, укажите временной период (например, 'за последний день', 'за последние 3 часа')."
+        
+        try:
+            time_window_hours = float(time_window_hours)
+        except (ValueError, TypeError):
+            return False, "Временной период должен быть числом. Пожалуйста, укажите корректный временной период (например, 'за последний день', 'за последние 3 часа')."
+        
+        # Validate time window (max 1 week = 168 hours)
+        if time_window_hours > 168:
+            return False, "Временной период не может превышать одну неделю (168 часов). Пожалуйста, укажите период не более одной недели."
+        
+        if time_window_hours <= 0:
+            return False, "Временной период должен быть положительным числом. Пожалуйста, укажите корректный временной период."
+        
+        return True, None
+    
     async def execute(self, parameters: dict = None, bot: Optional[Bot] = None, chat_id: Optional[int] = None) -> str:
         """
         Execute the command.
@@ -39,20 +61,11 @@ class MostActiveUserCommand(BaseCommand):
         params = parameters or {}
         time_window_hours = params.get("time_window_hours")
         
-        if not time_window_hours:
-            return "Прошу прощения, сэр/мадам, но временной период не был указан."
-        
+        # Convert to float (should already be validated)
         try:
             time_window_hours = float(time_window_hours)
         except (ValueError, TypeError):
             return "Прошу прощения, сэр/мадам, но формат временного периода неверен."
-        
-        # Validate time window (max 1 week = 168 hours)
-        if time_window_hours > 168:
-            return "Прошу прощения, сэр/мадам, но временной период не может превышать одну неделю (168 часов)."
-        
-        if time_window_hours <= 0:
-            return "Прошу прощения, сэр/мадам, но временной период должен быть положительным числом."
         
         try:
             # Get user counts from message storage

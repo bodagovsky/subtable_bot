@@ -44,8 +44,8 @@ class ChatGPTClient:
 ВАЖНО: Вероятность должна отражать уверенность в том, что пользователь хочет выполнить именно эту команду.
 - 0-30%: Маловероятно, что пользователь хочет эту команду
 - 31-60%: Возможно, пользователь хочет эту команду
-- 61-80%: Вероятно, пользователь хочет эту команду
-- 81-100%: Очень вероятно, что пользователь хочет эту команду
+- 61-94%: Вероятно, пользователь хочет эту команду
+- 95-100%: Очень вероятно, что пользователь хочет эту команду
 
 Отвечайте в формате JSON:
 {{
@@ -108,6 +108,108 @@ class ChatGPTClient:
                 ],
                 "reasoning": f"Ошибка при анализе сообщения: {str(e)}"
             }
+    
+    def analyze_message_intent(self, user_message: str) -> dict:
+        """
+        Analyze if user message is a command request or just conversational (encouragement, discouragement, greeting, etc.).
+        
+        Args:
+            user_message: The user's message
+            
+        Returns:
+            dict with 'is_command_request' (bool), 'intent_type' (str), and 'should_respond' (bool)
+        """
+        prompt = f"""Проанализируйте это сообщение пользователя: "{user_message}"
+
+Определите, является ли это сообщение:
+1. Запросом на выполнение команды (команда, действие, просьба что-то сделать)
+2. Поощрением или благодарностью (спасибо, хорошо, отлично, молодец и т.д.)
+3. Неодобрением или критикой (плохо, неправильно, не так и т.д.)
+4. Приветствием или прощанием (привет, пока, здравствуйте и т.д.)
+5. Просто разговором или комментарием, не требующим выполнения команды
+
+Отвечайте в формате JSON:
+{{
+    "is_command_request": true/false,
+    "intent_type": "command_request" | "encouragement" | "discouragement" | "greeting" | "conversation" | "other",
+    "should_respond": true/false,
+    "reasoning": "краткое обоснование"
+}}
+
+Если это не запрос команды, но это осмысленное сообщение, требующее ответа (поощрение, приветствие, разговор), установите should_respond в true.
+Если это просто случайное сообщение или спам, установите should_respond в false."""
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.3
+            )
+            
+            import json
+            result = json.loads(response.choices[0].message.content)
+            return result
+            
+        except Exception as e:
+            # Default: assume it's a command request if we can't analyze
+            return {
+                "is_command_request": True,
+                "intent_type": "other",
+                "should_respond": False,
+                "reasoning": f"Ошибка анализа: {str(e)}"
+            }
+    
+    def generate_conversational_response(self, user_message: str, intent_type: str) -> str:
+        """
+        Generate a polite conversational response from Alfred's perspective.
+        
+        Args:
+            user_message: The user's message
+            intent_type: Type of intent (encouragement, discouragement, greeting, conversation, etc.)
+            
+        Returns:
+            Polite response message in Alfred's style
+        """
+        prompt = f"""Пользователь отправил это сообщение: "{user_message}"
+
+Тип сообщения: {intent_type}
+
+Сгенерируйте вежливый, краткий ответ от лица Альфреда (дворецкого из серии о Бэтмене). 
+Ответ должен быть:
+- Формальным и вежливым (обращение "сэр/мадам")
+- Кратким (1-2 предложения)
+- Соответствующим типу сообщения:
+  * Для поощрения/благодарности: поблагодарить и выразить готовность помочь
+  * Для неодобрения: извиниться и предложить помощь
+  * Для приветствия: поприветствовать и предложить помощь
+  * Для разговора: вежливо ответить и предложить помощь
+
+Отвечайте на русском языке в стиле Альфреда."""
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7
+            )
+            return response.choices[0].message.content
+        except Exception:
+            # Fallback responses based on intent type
+            if intent_type == "encouragement":
+                return "Благодарю вас, сэр/мадам. Всегда к вашим услугам."
+            elif intent_type == "discouragement":
+                return "Прошу прощения, сэр/мадам. Я готов помочь вам исправить ситуацию."
+            elif intent_type == "greeting":
+                return "Здравствуйте, сэр/мадам. К вашим услугам. Чем могу помочь?"
+            else:
+                return "Понял вас, сэр/мадам. К вашим услугам. Если вам нужна помощь, просто попросите."
     
     def generate_clarification(self, user_message: str, available_commands: list) -> str:
         """Generate a clarification message when no command is matched."""

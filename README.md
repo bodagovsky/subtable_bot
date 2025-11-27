@@ -71,7 +71,7 @@ The bot is configured for Heroku deployment with automatic webhook setup.
    heroku config:set WEBHOOK_PATH=/webhook
    heroku config:set WEBHOOK_SECRET_TOKEN=your_secret_token  # Optional
    heroku config:set OPENAI_MODEL=gpt-4o-mini  # Optional
-   heroku config:set COMMAND_PROBABILITY_HIGH_THRESHOLD=80  # Optional, default: 80 (0-100)
+   heroku config:set COMMAND_PROBABILITY_HIGH_THRESHOLD=95  # Optional, default: 95 (0-100)
    heroku config:set COMMAND_PROBABILITY_LOW_THRESHOLD=50  # Optional, default: 50 (0-100)
    ```
 
@@ -104,7 +104,7 @@ The bot is configured for Heroku deployment with automatic webhook setup.
      - `WEBHOOK_PATH`: (Optional) Webhook path (default: `/webhook`)
      - `WEBHOOK_SECRET_TOKEN`: (Optional) Secret token for webhook verification
      - `OPENAI_MODEL`: (Optional) Model to use (default: `gpt-4o-mini`)
-     - `COMMAND_PROBABILITY_HIGH_THRESHOLD`: (Optional) High probability threshold for auto-execution (0-100, default: 80)
+     - `COMMAND_PROBABILITY_HIGH_THRESHOLD`: (Optional) High probability threshold for auto-execution (0-100, default: 95)
      - `COMMAND_PROBABILITY_LOW_THRESHOLD`: (Optional) Low probability threshold for command selection (0-100, default: 50)
 
 3. **Deploy**:
@@ -140,7 +140,7 @@ The bot uses webhooks to receive updates from Telegram (instead of long polling)
    - `WEBHOOK_PORT`: Port for the webhook server (default: 8443)
    - `WEBHOOK_PATH`: Path for webhook endpoint (default: `/webhook`)
    - `WEBHOOK_SECRET_TOKEN`: Optional secret token for webhook verification (recommended)
-   - `COMMAND_PROBABILITY_HIGH_THRESHOLD`: (Optional) High probability threshold for auto-execution (0-100, default: 80)
+   - `COMMAND_PROBABILITY_HIGH_THRESHOLD`: (Optional) High probability threshold for auto-execution (0-100, default: 95)
    - `COMMAND_PROBABILITY_LOW_THRESHOLD`: (Optional) Low probability threshold for command selection (0-100, default: 50)
 
 3. **Example configuration**:

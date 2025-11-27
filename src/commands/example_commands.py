@@ -27,6 +27,31 @@ class RandomNumberCommand(BaseCommand):
             description="Сгенерировать случайное число между min и max (по умолчанию: 1-100)"
         )
     
+    def validate_parameters(self, parameters: dict = None) -> tuple[bool, str | None]:
+        """Validate that min and max are valid integers."""
+        params = parameters or {}
+        
+        # If no parameters provided, use defaults (valid)
+        if "min" not in params and "max" not in params:
+            return True, None
+        
+        # Validate min if provided
+        if "min" in params:
+            try:
+                int(params["min"])
+            except (ValueError, TypeError):
+                return False, "Параметр 'min' должен быть целым числом. Пожалуйста, укажите корректное минимальное значение."
+        
+        # Validate max if provided
+        if "max" in params:
+            try:
+                int(params["max"])
+            except (ValueError, TypeError):
+                return False, "Параметр 'max' должен быть целым числом. Пожалуйста, укажите корректное максимальное значение."
+        
+        
+        return True, None
+    
     async def execute(self, parameters: dict = None) -> str:
         params = parameters or {}
         min_val = int(params.get("min", 1))

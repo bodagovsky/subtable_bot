@@ -39,6 +39,25 @@ class CommandHandler:
         """Get list of available commands with descriptions."""
         return [cmd.get_info() for cmd in self.commands.values()]
     
+    def validate_command(self, command_name: str, parameters: dict = None) -> tuple[bool, str | None]:
+        """
+        Validate command parameters before execution.
+        
+        Args:
+            command_name: Name of the command to validate
+            parameters: Parameters for the command
+            
+        Returns:
+            Tuple of (is_valid, error_message)
+            - is_valid: True if parameters are valid, False otherwise
+            - error_message: Error message if invalid, None if valid
+        """
+        if command_name not in self.commands:
+            return False, f"Команда '{command_name}' не найдена."
+        
+        command = self.commands[command_name]
+        return command.validate_parameters(parameters)
+    
     async def execute_command(self, command_name: str, parameters: dict = None, bot=None, chat_id: int = None, user_id: int = None) -> str:
         """
         Execute a command by name.
@@ -55,6 +74,11 @@ class CommandHandler:
         """
         if command_name not in self.commands:
             return f"Прошу прощения, сэр/мадам, но команда '{command_name}' не найдена."
+        
+        # Validate parameters before execution (safety check)
+        is_valid, error_message = self.validate_command(command_name, parameters)
+        if not is_valid:
+            return f"Прошу прощения, сэр/мадам. {error_message}"
         
         try:
             command = self.commands[command_name]

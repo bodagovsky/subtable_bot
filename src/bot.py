@@ -199,7 +199,7 @@ async def execute_command_directly(
     message_obj,
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int
-) -> None:
+) -> bool:
     """
     Execute a command directly without asking for confirmation.
     
@@ -209,8 +209,19 @@ async def execute_command_directly(
         message_obj: Telegram message object to reply to
         context: Bot context
         chat_id: Chat ID
+        
+    Returns:
+        True if command was executed successfully, False if validation failed
     """
     logger.info(f"Executing command directly: {command_name} with parameters: {parameters}")
+    
+    # Validate parameters before execution
+    is_valid, error_message = command_handler.validate_command(command_name, parameters)
+    if not is_valid:
+        # Ask user to clarify invalid parameters
+        clarification = f"Прошу прощения, сэр/мадам. {error_message}"
+        await message_obj.reply_text(clarification)
+        return False
     
     bot = context.bot
     user_id = message_obj.from_user.id if message_obj.from_user else None
@@ -222,6 +233,7 @@ async def execute_command_directly(
     
     # Reply to user
     await message_obj.reply_text(response)
+    return True
 
 
 async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -253,9 +265,6 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
                 
                 logger.info(f"User selected command {choice_num}: {command_name} with parameters: {parameters}")
                 
-                # Clear pending choice
-                del context.user_data["pending_choice"]
-                
                 # Handle special case for most_active_user
                 if command_name == "most_active_user":
                     # Extract time window from the original message or use provided parameters
@@ -265,7 +274,8 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
                         if time_window_result.get("success") and time_window_result.get("time_window_hours"):
                             parameters["time_window_hours"] = time_window_result["time_window_hours"]
                         else:
-                            # Ask for time window
+                            # Ask for time window - clear pending_choice since we're moving to pending_time_window
+                            del context.user_data["pending_choice"]
                             context.user_data["pending_time_window"] = {
                                 "command": command_name,
                                 "attempt": 1
@@ -276,6 +286,18 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
                                 "Максимально допустимый период составляет одну неделю."
                             )
                             return True
+                
+                # Validate parameters before execution (before clearing pending_choice)
+                is_valid, error_message = command_handler.validate_command(command_name, parameters)
+                if not is_valid:
+                    # Ask user to clarify invalid parameters
+                    clarification = f"Прошу прощения, сэр/мадам. {error_message}"
+                    await update.message.reply_text(clarification)
+                    # Keep pending_choice so user can provide corrected parameters
+                    return True
+                
+                # Clear pending choice only after successful validation
+                del context.user_data["pending_choice"]
                 
                 # Execute the command
                 bot = context.bot
@@ -321,6 +343,15 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         logger.info(f"User confirmed command: {command_name} with parameters: {parameters}")
         
+        # Validate parameters before execution
+        is_valid, error_message = command_handler.validate_command(command_name, parameters)
+        if not is_valid:
+            # Ask user to clarify invalid parameters
+            clarification = f"Прошу прощения, сэр/мадам. {error_message}"
+            await update.message.reply_text(clarification)
+            # Keep pending command so user can provide corrected parameters
+            return True
+        
         # Get bot, chat_id, and user_id for commands that need them
         bot = context.bot
         chat_id = update.message.chat.id
@@ -356,7 +387,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = message_obj.chat.id
     user_id = message_obj.from_user.id if message_obj.from_user else None
     
-    # Check if user is in ignore list (check early, but allow silence_me command to work)
+    # Check if user is in ignore list (check early, but allow unsilence requests to work)
     if user_id and user_ignore_list.is_ignored(user_id):
         # First check if it's a confirmation for silence_me command
         if context.user_data.get("pending_command"):
@@ -367,35 +398,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if handled:
                     return
         
-        # Check if this is a new silence_me request
+        # Check if this is a new unsilence request
         should_process, user_message = should_process_message(update, context)
         if should_process and user_message:
-            # Check if it's a silence_me request
+            # Check for explicit unsilence keywords first
+            user_message_lower = user_message.lower()
+            unsilence_keywords = [
+                "stop ignoring me", "stop ignoring", "don't ignore me", "don't ignore",
+                "не игнорируй меня", "перестань игнорировать", "не игнорируй", 
+                "отмени игнорирование", "прекрати игнорировать"
+            ]
+            is_unsilence_request = any(keyword in user_message_lower for keyword in unsilence_keywords)
+            
+            # Also check if it's a silence_me command via probability analysis
             available_commands = command_handler.get_available_commands()
             analysis = chatgpt.analyze_message(user_message, available_commands)
-            command_name = analysis.get("command")
+            commands_with_probs = analysis.get("commands", [])
             
-            # Only process silence_me command when user is ignored (to allow canceling ignore)
-            if command_name == "silence_me":
-                # Process silence_me command normally (it will toggle the ignore state)
-                parameters = analysis.get("parameters", {})
-                reasoning = analysis.get("reasoning", "")
-                
-                # Store pending command
-                context.user_data["pending_command"] = {
-                    "command": command_name,
-                    "parameters": parameters
-                }
-                
-                confirmation_message = "Понял вас, сэр/мадам. Вы желаете изменить статус игнорирования.\n\n"
-                if reasoning:
-                    confirmation_message += f"Мое понимание: {reasoning}\n\n"
-                confirmation_message += "Верно ли я вас понял? Пожалуйста, подтвердите, ответив 'да'."
-                
-                await message_obj.reply_text(confirmation_message, parse_mode="Markdown")
+            # Find silence_me command in the results
+            silence_me_cmd = None
+            for cmd in commands_with_probs:
+                if cmd.get("name") == "silence_me":
+                    silence_me_cmd = cmd
+                    break
+            
+            # Only process if it's an explicit unsilence request OR silence_me with high probability
+            # (high probability means they really want to unsilence, not just saying "ignore me" again)
+            silence_me_prob = silence_me_cmd.get("probability", 0) if silence_me_cmd else 0
+            should_process_unsilence = is_unsilence_request or silence_me_prob >= COMMAND_PROBABILITY_HIGH_THRESHOLD
+            
+            if should_process_unsilence:
+                # Execute silence_me command directly to toggle (will unsilence since user is already ignored)
+                bot = context.bot
+                response = await command_handler.execute_command(
+                    "silence_me", {}, bot=bot, chat_id=chat_id, user_id=user_id
+                )
+                await message_obj.reply_text(response)
                 return
         
-        # User is ignored and it's not a silence_me command - ignore completely
+        # User is ignored and it's not an unsilence request - ignore completely
         logger.info(f"User {user_id} is in ignore list, ignoring message")
         return
     
@@ -633,10 +674,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Будьте так любезны, укажите номер команды, которую вы желаете выполнить, или уточните ваш запрос."
         )
     
-    # Case 4: No commands reached low threshold - ask for clarification
+    # Case 4: No commands reached low threshold - check if it's conversational
     else:
-        clarification_message = chatgpt.generate_clarification(user_message, available_commands)
-        await message_obj.reply_text(clarification_message)
+        # Analyze if the message is a command request or just conversational
+        intent_analysis = chatgpt.analyze_message_intent(user_message)
+        is_command_request = intent_analysis.get("is_command_request", True)
+        should_respond = intent_analysis.get("should_respond", False)
+        intent_type = intent_analysis.get("intent_type", "other")
+        
+        if not is_command_request and should_respond:
+            # It's a meaningful conversational message - generate a polite response
+            response = chatgpt.generate_conversational_response(user_message, intent_type)
+            await message_obj.reply_text(response)
+        else:
+            # It's likely a command request that wasn't understood - ask for clarification
+            clarification_message = chatgpt.generate_clarification(user_message, available_commands)
+            await message_obj.reply_text(clarification_message)
 
 
 

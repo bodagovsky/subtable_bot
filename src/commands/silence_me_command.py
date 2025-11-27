@@ -31,11 +31,17 @@ class SilenceMeCommand(BaseCommand):
         if not user_id:
             return "Прошу прощения, сэр/мадам, но не удалось определить пользователя."
         
+        # Check current state
+        was_ignored = user_ignore_list.is_ignored(user_id)
+        
         # Toggle ignore state
         is_now_ignored = user_ignore_list.toggle_user(user_id)
         
         if is_now_ignored:
             return "Как скажете, сэр/мадам. Я буду игнорировать ваши сообщения. Если вы захотите, чтобы я снова отвечал вам, просто попросите отменить игнорирование."
         else:
-            return "К вашим услугам, сэр/мадам. Я снова буду обрабатывать ваши сообщения."
+            if was_ignored:
+                return "К вашим услугам, сэр/мадам. Я снова буду обрабатывать ваши сообщения."
+            else:
+                return "К вашим услугам, сэр/мадам. Вы не были в списке игнорируемых пользователей."
 
