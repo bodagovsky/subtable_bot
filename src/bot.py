@@ -265,9 +265,6 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
                 
                 logger.info(f"User selected command {choice_num}: {command_name} with parameters: {parameters}")
                 
-                # Clear pending choice
-                del context.user_data["pending_choice"]
-                
                 # Handle special case for most_active_user
                 if command_name == "most_active_user":
                     # Extract time window from the original message or use provided parameters
@@ -277,7 +274,8 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
                         if time_window_result.get("success") and time_window_result.get("time_window_hours"):
                             parameters["time_window_hours"] = time_window_result["time_window_hours"]
                         else:
-                            # Ask for time window
+                            # Ask for time window - clear pending_choice since we're moving to pending_time_window
+                            del context.user_data["pending_choice"]
                             context.user_data["pending_time_window"] = {
                                 "command": command_name,
                                 "attempt": 1
@@ -289,13 +287,17 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
                             )
                             return True
                 
-                # Validate parameters before execution
+                # Validate parameters before execution (before clearing pending_choice)
                 is_valid, error_message = command_handler.validate_command(command_name, parameters)
                 if not is_valid:
                     # Ask user to clarify invalid parameters
                     clarification = f"Прошу прощения, сэр/мадам. {error_message}"
                     await update.message.reply_text(clarification)
+                    # Keep pending_choice so user can provide corrected parameters
                     return True
+                
+                # Clear pending choice only after successful validation
+                del context.user_data["pending_choice"]
                 
                 # Execute the command
                 bot = context.bot
