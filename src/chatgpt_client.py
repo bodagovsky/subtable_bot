@@ -1,6 +1,10 @@
 """ChatGPT/OpenAI API client for natural language processing."""
+import logging
+from subprocess import list2cmdline
 from openai import OpenAI
 from config import OPENAI_API_KEY, OPENAI_MODEL, SYSTEM_PROMPT
+
+logger = logging.getLogger(__name__)
 
 
 class ChatGPTClient:
@@ -350,4 +354,167 @@ class ChatGPTClient:
             return response.choices[0].message.content
         except Exception as e:
             return f"Прошу прощения, сэр/мадам, но произошла ошибка: {str(e)}"
+    
+    def summarize_messages(self, messages: list[dict]) -> dict:
+        """
+        Summarize messages and extract topics using OpenAI.
+        
+        Args:
+            messages: List of message dictionaries with keys:
+                - user_id: int
+                - message_id: int
+                - text: str
+                - timestamp: str or float (Unix timestamp)
+        
+        Returns:
+            Dictionary with 'topics' list containing:
+                - topic_handle: str (2-3 words, lowercase, underscore-separated)
+                - description: str (2-3 words human-readable)
+                - start_message: dict with message_id
+                - message_count: int
+                - summary: str (3-5 main points referring participants)
+        """
+        # Format messages for OpenAI
+        messages_text = "\n".join([
+            f"user_id: {msg['user_id']}, message_id: {msg['message_id']}, text: {msg['text']}, timestamp: {msg['timestamp']}"
+            for msg in messages
+        ])
+        
+        prompt = f"""Проанализируйте следующие сообщения из чата и определите основные темы обсуждения.
+
+Сообщения:
+{messages_text}
+
+Ваша задача:
+1. Определить все темы обсуждения (может быть одна или несколько)
+2. Для каждой темы создать:
+   - topic_handle: короткий идентификатор из 2-3 слов в нижнем регистре, разделенных подчеркиванием (например: air_pollution, politics_news, upcoming_holidays_event)
+   - description: краткое описание из 2-3 слов на русском языке (например: "Загрязнение воздуха", "Новости политики")
+   - start_message: message_id первого сообщения в теме
+   - message_count: количество сообщений, относящихся к теме (одно сообщение может относиться к нескольким темам)
+   - summary: 3-5 основных пунктов обсуждения с указанием участников (например: "Dina сказала, что из-за смога трудно дышать")
+
+ВАЖНО:
+- Если есть только одна тема, верните массив с одним элементом
+- Если тем несколько, верните массив со всеми темами
+- Каждый пункт в summary должен ссылаться на конкретного участника (user_id или имя, если возможно)
+- topic_handle должен быть уникальным идентификатором темы
+
+Отвечайте в формате JSON:
+{{
+    "topics": [
+        {{
+            "topic_handle": "air_pollution",
+            "description": "Загрязнение воздуха",
+            "start_message": {{"message_id": 12345}},
+            "message_count": 168,
+            "summary": "1. Dina сказала, что из-за смога трудно дышать\\n2. Mike ответил, что некоторые измерительные устройства считают загрязнение воздуха неправильно\\n3. Thomas сказал, что уже заказал устройство для очистки воздуха"
+        }},
+        ...
+    ]
+}}"""
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.5
+            )
+            
+            import json
+            result = json.loads(response.choices[0].message.content)
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error summarizing messages: {e}")
+            return {"topics": []}
+    
+    def match_topic(self, user_message: str, topics: list[dict]) -> dict:
+        """
+        Match user message to topics using probability analysis.
+        
+        Args:
+            user_message: User's message query
+            topics: List of topic dictionaries with 'topic_handle' and 'description'
+            
+        Returns:
+            Dictionary with 'topics' list containing topics with probabilities
+        """
+        if not topics:
+            return {"topics": []}
+        
+        # Format topics for analysis
+        topics_text = "\n".join([
+            f"{i+1}. {topic.get('description', topic.get('topic_handle', ''))} ({topic.get('message_count', 0)} сообщений)"
+            for i, topic in enumerate(topics)
+        ])
+        
+        prompt = f"""Пользователь отправил запрос: "{user_message}"
+
+Доступные темы обсуждения:
+{topics_text}
+
+Определите вероятность (от 0 до 100) того, что пользователь хочет узнать о каждой из тем.
+
+ВАЖНО: Вероятность должна отражать уверенность в том, что пользователь хочет именно эту тему.
+- 0-30%: Маловероятно, что пользователь хочет эту тему
+- 31-60%: Возможно, пользователь хочет эту тему
+- 61-94%: Вероятно, пользователь хочет эту тему
+- 95-100%: Очень вероятно, что пользователь хочет эту тему
+
+Отвечайте в формате JSON:
+{{
+    "topics": [
+        {{
+            "topic_index": 0,
+            "probability": <число от 0 до 100>,
+            "reasoning": "краткое обоснование"
+        }},
+        ...
+    ]
+}}
+
+Включите все темы в список, даже если вероятность низкая."""
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.3
+            )
+            
+            import json
+            result = json.loads(response.choices[0].message.content)
+            
+            # Merge probabilities with topic data
+            topic_probs = {tp.get("topic_index"): tp for tp in result.get("topics", [])}
+            matched_topics = []
+            
+            for i, topic in enumerate(topics):
+                prob_data = topic_probs.get(i, {"probability": 0, "reasoning": "Не найдено"})
+                matched_topics.append({
+                    **topic,
+                    "probability": prob_data.get("probability", 0),
+                    "reasoning": prob_data.get("reasoning", "")
+                })
+            
+            return {"topics": matched_topics}
+            
+        except Exception as e:
+            logger.error(f"Error matching topic: {e}")
+            # Return all topics with 0 probability
+            return {
+                "topics": [
+                    {**topic, "probability": 0, "reasoning": f"Ошибка анализа: {str(e)}"}
+                    for topic in topics
+                ]
+            }
 
