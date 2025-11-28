@@ -9,6 +9,8 @@ from commands.example_commands import (
 from commands.silence_command import SilenceCommand
 from commands.most_active_user import MostActiveUserCommand
 from commands.silence_me_command import SilenceMeCommand
+from commands.summarize_command import SummarizeCommand
+from commands.breakdown_topic_command import BreakdownTopicCommand
 
 
 class CommandHandler:
@@ -27,6 +29,8 @@ class CommandHandler:
             MostActiveUserCommand(),
             SilenceCommand(),
             SilenceMeCommand(),
+            SummarizeCommand(),
+            BreakdownTopicCommand(),
         ]
         for cmd in default_commands:
             self.register_command(cmd)

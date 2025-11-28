@@ -93,6 +93,19 @@ class RedisClient:
         """
         return f"channel:messages:{channel_id}"
     
+    def build_topic_key(self, channel_id: int, topic_handle: str) -> str:
+        """
+        Build Redis key for topic summary.
+        
+        Args:
+            channel_id: Channel/chat ID
+            topic_handle: Topic handle (e.g., "air_pollution")
+            
+        Returns:
+            Redis key string: "summarry:channel:{channel_id}:{topic_handle}"
+        """
+        return f"summarry:channel:{channel_id}:{topic_handle}"
+    
     def append_message(self, channel_id: int, user_id: int, message_id: int, message_timestamp: datetime) -> bool:
         """
         Append a message to Redis sorted set.
@@ -173,6 +186,119 @@ class RedisClient:
             
         except Exception as e:
             logger.error(f"Error getting messages from Redis: {e}")
+            return []
+    
+    def get_messages_by_count(
+        self, 
+        channel_id: int, 
+        count: int
+    ) -> List[Tuple[str, float]]:
+        """
+        Get last N messages from Redis sorted set using ZRANGE with REV.
+        
+        Args:
+            channel_id: Channel/chat ID
+            count: Number of messages to retrieve
+            
+        Returns:
+            List of tuples (message_value, score) where message_value is "{user_id}:{message_id}"
+            and score is the Unix timestamp, ordered from newest to oldest
+        """
+        try:
+            key = self.build_channel_messages_key(channel_id)
+            
+            # Use ZRANGE with REV to get last N messages (newest first)
+            # REV reverses the order, so we get the highest scores (newest) first
+            # WITHSCORES returns both values and scores
+            messages = self.client.zrange(key, 0, count - 1, desc=True, withscores=True)
+            
+            # Convert to list of tuples (value, score)
+            return [(msg[0], msg[1]) for msg in messages]
+            
+        except Exception as e:
+            logger.error(f"Error getting messages by count from Redis: {e}")
+            return []
+    
+    def cache_topic_summary(self, channel_id: int, topic_handle: str, topic_data: dict) -> bool:
+        """
+        Cache topic summary in Redis.
+        
+        Args:
+            channel_id: Channel/chat ID
+            topic_handle: Topic handle (e.g., "air_pollution")
+            topic_data: Dictionary containing topic summary data
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            key = self.build_topic_key(channel_id, topic_handle)
+            
+            # Store topic data as JSON string
+            import json
+            topic_json = json.dumps(topic_data, ensure_ascii=False)
+            
+            # Use SET to store the topic summary
+            self.client.set(key, topic_json)
+            
+            logger.debug(f"Cached topic summary: {key}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error caching topic summary: {e}")
+            return False
+    
+    def get_topic_summary(self, channel_id: int, topic_handle: str) -> Optional[dict]:
+        """
+        Get topic summary from Redis cache.
+        
+        Args:
+            channel_id: Channel/chat ID
+            topic_handle: Topic handle (e.g., "air_pollution")
+            
+        Returns:
+            Dictionary with topic summary data, or None if not found
+        """
+        try:
+            key = self.build_topic_key(channel_id, topic_handle)
+            
+            # Get topic data from Redis
+            topic_json = self.client.get(key)
+            
+            if topic_json is None:
+                return None
+            
+            # Parse JSON
+            import json
+            return json.loads(topic_json)
+            
+        except Exception as e:
+            logger.error(f"Error getting topic summary: {e}")
+            return None
+    
+    def get_all_topic_keys(self, channel_id: int) -> List[str]:
+        """
+        Get all topic keys for a channel.
+        
+        Args:
+            channel_id: Channel/chat ID
+            
+        Returns:
+            List of topic handles (without full key prefix)
+        """
+        try:
+            # Use SCAN to find all topic keys for this channel
+            namespace = f"summarry:channel:{channel_id}:*"
+            keys = self.get_all_keys(namespace)
+            
+            # Extract topic handles from keys
+            prefix = f"summarry:channel:{channel_id}:"
+            topic_handles = [key.replace(prefix, "") for key in keys if key.startswith(prefix)]
+            
+            return topic_handles
+            
+        except Exception as e:
+            logger.error(f"Error getting topic keys: {e}")
             return []
     
     def get_all_keys(
