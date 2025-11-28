@@ -1,0 +1,229 @@
+"""Redis client for message storage and other data."""
+import os
+import redis
+from typing import Set, Optional, List, Tuple
+from enum import Enum
+from datetime import datetime, timedelta
+import logging
+from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
+
+
+class RedisType(Enum):
+    """Redis data type enumeration."""
+    STRING = "string"
+    LIST = "list"
+    SET = "set"
+    ZSET = "zset"  # sorted set
+    HASH = "hash"
+    STREAM = "stream"
+
+
+class RedisClient:
+    """Redis client wrapper for bot operations."""
+    
+    def __init__(self):
+        """Initialize Redis connection."""
+        # Get Redis credentials from environment variables
+        redis_url = os.getenv("REDISCLOUD_URL", "")
+        redis_password = os.getenv("REDIS_PASSWORD", "")
+        redis_port = os.getenv("REDIS_PORT", "")
+        redis_username = os.getenv("REDIS_USERNAME", "")
+        
+        # Parse URL if provided (Redis Cloud URLs typically include connection info)
+        if redis_url:
+            try:
+                parsed = urlparse(redis_url)
+                # Extract host and port from URL if not provided separately
+                if not redis_port:
+                    redis_port = parsed.port or 6379
+                redis_host = parsed.hostname or "localhost"
+                # Extract password from URL if not provided separately
+                if parsed.password and not redis_password:
+                    redis_password = parsed.password
+                # Extract username from URL if not provided separately
+                if parsed.username and not redis_username:
+                    redis_username = parsed.username
+            except Exception as e:
+                logger.warning(f"Could not parse REDISCLOUD_URL: {e}, using defaults")
+                redis_host = "localhost"
+                redis_port = redis_port or 6379
+        else:
+            redis_host = "localhost"
+            redis_port = redis_port or 6379
+        
+        # Convert port to int
+        try:
+            redis_port = int(redis_port) if redis_port else 6379
+        except (ValueError, TypeError):
+            redis_port = 6379
+        
+        # Build connection parameters
+        connection_params = {
+            "host": redis_host,
+            "port": redis_port,
+            "decode_responses": True  # Automatically decode responses to strings
+        }
+        
+        if redis_password:
+            connection_params["password"] = redis_password
+        
+        if redis_username:
+            connection_params["username"] = redis_username
+        
+        try:
+            self.client = redis.Redis(**connection_params)
+            # Test connection
+            self.client.ping()
+            logger.info(f"Connected to Redis at {redis_host}:{redis_port}")
+        except Exception as e:
+            logger.error(f"Failed to connect to Redis: {e}")
+            raise
+    
+    def build_channel_messages_key(self, channel_id: int) -> str:
+        """
+        Build Redis key for channel messages.
+        
+        Args:
+            channel_id: Channel/chat ID
+            
+        Returns:
+            Redis key string: "channel:messages:{channel_id}"
+        """
+        return f"channel:messages:{channel_id}"
+    
+    def append_message(self, channel_id: int, user_id: int, message_id: int, message_timestamp: datetime) -> bool:
+        """
+        Append a message to Redis sorted set.
+        
+        Args:
+            channel_id: Channel/chat ID
+            user_id: User ID
+            message_id: Message ID
+            message_timestamp: Message timestamp (datetime object)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            key = self.build_channel_messages_key(channel_id)
+            
+            # Convert timestamp to Unix timestamp (score for sorted set)
+            unix_timestamp = message_timestamp.timestamp()
+            
+            # Build message value as "{user_id}:{message_id}"
+            message_value = f"{user_id}:{message_id}"
+            
+            # Add message to sorted set with timestamp as score
+            # ZADD returns the number of elements added (1 if new, 0 if already exists)
+            # Note: redis-py zadd accepts dict mapping member to score
+            result = self.client.zadd(key, {message_value: unix_timestamp})
+            
+            # Remove messages older than 7 days
+            # Calculate cutoff timestamp (7 days ago)
+            cutoff_timestamp = (datetime.now() - timedelta(days=7)).timestamp()
+            
+            # Remove old messages using ZREMRANGEBYSCORE
+            # -inf to cutoff_timestamp removes all messages with score <= cutoff_timestamp
+            removed_count = self.client.zremrangebyscore(key, "-inf", cutoff_timestamp)
+            
+            if removed_count > 0:
+                logger.debug(f"Removed {removed_count} old messages from channel {channel_id}")
+            
+            logger.debug(f"Stored message {message_id} from user {user_id} in channel {channel_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error appending message to Redis: {e}")
+            return False
+    
+    def get_messages_by_time_range(
+        self, 
+        channel_id: int, 
+        start_time: datetime, 
+        end_time: Optional[datetime] = None
+    ) -> List[Tuple[str, float]]:
+        """
+        Get messages from Redis sorted set within a time range using ZRANGE BYSCORE.
+        
+        Args:
+            channel_id: Channel/chat ID
+            start_time: Start time (inclusive)
+            end_time: End time (inclusive). If None, uses current time.
+            
+        Returns:
+            List of tuples (message_value, score) where message_value is "{user_id}:{message_id}"
+            and score is the Unix timestamp
+        """
+        try:
+            key = self.build_channel_messages_key(channel_id)
+            
+            # Convert timestamps to Unix timestamps
+            start_timestamp = start_time.timestamp()
+            end_timestamp = end_time.timestamp() if end_time else datetime.now().timestamp()
+            
+            # Use ZRANGEBYSCORE to get messages in time range
+            # WITHSCORES returns both values and scores
+            messages = self.client.zrangebyscore(key, start_timestamp, end_timestamp, withscores=True)
+            
+            # Convert to list of tuples (value, score)
+            # messages is a list of tuples from Redis: [(value, score), ...]
+            return [(msg[0], msg[1]) for msg in messages]
+            
+        except Exception as e:
+            logger.error(f"Error getting messages from Redis: {e}")
+            return []
+    
+    def get_all_keys(
+        self, 
+        namespace: str, 
+        redis_type: Optional[RedisType] = None
+    ) -> Set[str]:
+        """
+        Get all keys matching a namespace pattern using SCAN.
+        
+        Args:
+            namespace: Namespace pattern (e.g., "channel:messages:*")
+            redis_type: Optional Redis type filter (RedisType enum)
+            
+        Returns:
+            Set of matching keys
+        """
+        try:
+            keys = set()
+            cursor = 0
+            
+            # Use SCAN to iterate through all matching keys
+            while True:
+                # SCAN with MATCH pattern
+                cursor, batch = self.client.scan(cursor, match=namespace, count=100)
+                
+                # If type filter is specified, filter by type
+                if redis_type:
+                    filtered_batch = []
+                    for key in batch:
+                        # Get key type and compare
+                        key_type = self.client.type(key)
+                        # Handle both string and bytes responses
+                        if isinstance(key_type, bytes):
+                            key_type = key_type.decode('utf-8')
+                        if key_type == redis_type.value:
+                            filtered_batch.append(key)
+                    batch = filtered_batch
+                
+                keys.update(batch)
+                
+                if cursor == 0:
+                    break
+            
+            return keys
+            
+        except Exception as e:
+            logger.error(f"Error getting keys from Redis: {e}")
+            return set()
+
+
+# Global Redis client instance
+redis_client = RedisClient()
+
