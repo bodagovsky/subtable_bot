@@ -30,38 +30,11 @@ class RedisClient:
         redis_password = os.getenv("REDIS_PASSWORD", "")
         redis_port = os.getenv("REDIS_PORT", "")
         redis_username = os.getenv("REDIS_USERNAME", "")
-        
-        # Parse URL if provided (Redis Cloud URLs typically include connection info)
-        if redis_url:
-            try:
-                parsed = urlparse(redis_url)
-                # Extract host and port from URL if not provided separately
-                if not redis_port:
-                    redis_port = parsed.port or 6379
-                redis_host = parsed.hostname or "localhost"
-                # Extract password from URL if not provided separately
-                if parsed.password and not redis_password:
-                    redis_password = parsed.password
-                # Extract username from URL if not provided separately
-                if parsed.username and not redis_username:
-                    redis_username = parsed.username
-            except Exception as e:
-                logger.warning(f"Could not parse REDISCLOUD_URL: {e}, using defaults")
-                redis_host = "localhost"
-                redis_port = redis_port or 6379
-        else:
-            redis_host = "localhost"
-            redis_port = redis_port or 6379
-        
-        # Convert port to int
-        try:
-            redis_port = int(redis_port) if redis_port else 6379
-        except (ValueError, TypeError):
-            redis_port = 6379
+    
         
         # Build connection parameters
         connection_params = {
-            "host": redis_host,
+            "host": redis_url,
             "port": redis_port,
             "decode_responses": True  # Automatically decode responses to strings
         }
@@ -76,7 +49,7 @@ class RedisClient:
             self.client = redis.Redis(**connection_params)
             # Test connection
             self.client.ping()
-            logger.info(f"Connected to Redis at {redis_host}:{redis_port}")
+            logger.info(f"Connected to Redis at {redis_url}:{redis_port}")
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
             raise
