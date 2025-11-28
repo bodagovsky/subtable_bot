@@ -82,10 +82,12 @@ class MTProtoClient:
             # Ensure client is connected
             if not self.client.is_connected():
                 await self.start()
+
+            entity = await self.client.get_entity(chat_id)
             
             # Get messages using get_messages
             # Telethon's get_messages can handle multiple message IDs at once
-            messages = await self.client.get_messages(chat_id, ids=message_ids)
+            messages = await self.client.get_messages(entity, ids=message_ids)
             
             # Telethon returns a list when multiple IDs are provided, or a single Message for one ID
             # Normalize to list
