@@ -27,10 +27,6 @@ jobs:
           WEBHOOK_URL="${{ secrets.WEBHOOK_URL }}" \
           WEBHOOK_PATH="${{ secrets.WEBHOOK_PATH || '/webhook' }}" \
           WEBHOOK_SECRET_TOKEN="${{ secrets.WEBHOOK_SECRET_TOKEN }}" \
-          REDISCLOUD_URL="${{ secrets.REDISCLOUD_URL }}" \
-          REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
-          REDIS_PORT="${{ secrets.REDIS_PORT }}" \
-          REDIS_USERNAME="${{ secrets.REDIS_USERNAME }}" \
           TELEGRAM_API_HASH="${{ secrets.TELEGRAM_API_HASH }}" \
           TELEGRAM_API_ID="${{ secrets.TELEGRAM_API_ID }}" \
           TELEGRAM_BOT_TOKEN="${{ secrets.TELEGRAM_BOT_TOKEN }}" \
