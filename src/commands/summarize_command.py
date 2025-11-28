@@ -47,6 +47,8 @@ class SummarizeCommand(BaseCommand):
                     return False, "Минимальное количество сообщений для анализа: 15. Пожалуйста, укажите не менее 15 сообщений."
                 if message_count > 1000:
                     return False, "Максимальное количество сообщений для анализа: 1000. Пожалуйста, укажите не более 1000 сообщений."
+                # Update params with converted value
+                params["message_count"] = message_count
             except (ValueError, TypeError):
                 return False, "Количество сообщений должно быть целым числом."
         
@@ -58,6 +60,8 @@ class SummarizeCommand(BaseCommand):
                     return False, "Минимальный временной период для анализа: 30 минут. Пожалуйста, укажите период не менее 30 минут."
                 if time_window_hours > 24:
                     return False, "Максимальный временной период для анализа: 24 часа. Пожалуйста, укажите период не более 24 часов."
+                # Update params with converted value
+                params["time_window_hours"] = time_window_hours
             except (ValueError, TypeError):
                 return False, "Временной период должен быть числом."
         
