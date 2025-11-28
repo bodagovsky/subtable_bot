@@ -3,3 +3,4 @@ openai==1.12.0
 python-dotenv==1.0.0
 aiohttp==3.9.1
 pytz==2025.1
+redis==5.0.1
