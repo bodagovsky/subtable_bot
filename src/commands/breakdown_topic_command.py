@@ -25,12 +25,19 @@ class BreakdownTopicCommand(BaseCommand):
         self.chatgpt = ChatGPTClient()
     
     def validate_parameters(self, parameters: Dict = None) -> tuple[bool, str | None]:
-        """Validate that topic query is provided."""
+        """Validate that topic query is provided.
+        
+        Note: This method allows missing topic_query - extraction will happen in execute() if user_message is provided.
+        """
         params = parameters or {}
         topic_query = params.get("topic_query")
         
-        if not topic_query:
-            return False, "Пожалуйста, укажите тему, которую вы хотите разобрать (например, 'загрязнение воздуха' или 'политика')."
+        # Allow missing topic_query - it will be extracted in execute() if user_message is provided
+        # Only validate if topic_query is explicitly provided
+        if topic_query is not None:
+            topic_query = str(topic_query).strip()
+            if not topic_query:
+                return False, "Пожалуйста, укажите тему, которую вы хотите разобрать (например, 'загрязнение воздуха' или 'политика')."
         
         return True, None
     
@@ -59,10 +66,24 @@ class BreakdownTopicCommand(BaseCommand):
         params = parameters or {}
         topic_query = params.get("topic_query", "").strip()
         
-        # Step 1: If topic_query is not provided, try to extract from user_message
+        # Step 1: If topic_query is not provided, try to extract from user_message using OpenAI
         if not topic_query and user_message:
             logger.info(f"Attempting to extract topic_query from user message: {user_message}")
-            topic_query = user_message.strip()
+            extraction_result = self.chatgpt.extract_topic_query(user_message)
+            
+            if extraction_result.get("success") and extraction_result.get("topic_query"):
+                # Topic query extracted successfully
+                topic_query = extraction_result["topic_query"]
+                params["topic_query"] = topic_query
+                logger.info(f"Extracted topic_query: {topic_query}")
+            else:
+                # Extraction failed - ask user to provide explicitly
+                reasoning = extraction_result.get("reasoning", "Не удалось определить тему")
+                logger.info(f"Topic query extraction failed: {reasoning}")
+                return (
+                    "Прошу прощения, сэр/мадам. Я не смог определить тему из вашего сообщения.\n\n"
+                    "Пожалуйста, укажите явно тему, которую вы хотите разобрать (например, 'загрязнение воздуха', 'политика', 'новости')."
+                )
         
         if not topic_query:
             return "Прошу прощения, сэр/мадам, но вы не указали тему. Пожалуйста, укажите тему, которую вы хотите разобрать."

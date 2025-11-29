@@ -31,9 +31,9 @@ class UserIgnoreList:
         if self.is_ignored(user_id):
             self.remove_user(user_id)
             return False
-        else:
-            self.add_user(user_id)
-            return True
+        
+        self.add_user(user_id)
+        return True
 
 
 # Global ignore list instance

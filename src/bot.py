@@ -19,6 +19,7 @@ from command_handler import CommandHandler as BotCommandHandler
 from message_storage import message_storage
 from silence_state import silence_state
 from user_ignore_list import user_ignore_list
+from redis_client import redis_client
 from datetime import datetime
 
 # Enable logging
@@ -222,6 +223,25 @@ async def execute_command_directly(
     if not is_valid:
         # Ask user to clarify invalid parameters
         clarification = f"Прошу прощения, сэр/мадам. {error_message}"
+        
+        # Set appropriate pending flag based on command and error
+        if command_name == "summarize":
+            # Check if it's a parameter extraction issue
+            if not parameters.get("message_count") and not parameters.get("time_window_hours"):
+                context.user_data["pending_summarize_parameters"] = {
+                    "command": command_name,
+                    "chat_id": chat_id
+                }
+                logger.info(f"Set pending_summarize_parameters for chat {chat_id} due to validation failure")
+        elif command_name == "breakdown_topic":
+            # Set pending_topic for breakdown_topic validation failures
+            context.user_data["pending_topic"] = {
+                "command": "breakdown_topic",
+                "chat_id": chat_id,
+                "source": "breakdown_topic"
+            }
+            logger.info(f"Set pending_topic for chat {chat_id} due to breakdown_topic validation failure")
+        
         await message_obj.reply_text(clarification)
         return False
     
@@ -237,14 +257,33 @@ async def execute_command_directly(
         command_name, parameters, bot=bot, chat_id=chat_id, user_id=user_id, user_message=user_message
     )
     
-    # Check if breakdown_topic needs clarification (multiple topics found)
-    if command_name == "breakdown_topic" and ("Какую тему" in response or "несколько тем" in response):
-        # Set pending_breakdown_topic so user's next response is processed as topic selection
-        context.user_data["pending_breakdown_topic"] = {
+    # Check response and set appropriate pending flags
+    
+    # Check if summarize needs parameters
+    if command_name == "summarize" and ("Я не смог определить параметры" in response or "укажите явно" in response):
+        context.user_data["pending_summarize_parameters"] = {
             "command": command_name,
             "chat_id": chat_id
         }
-        logger.info(f"Set pending_breakdown_topic for chat {chat_id}")
+        logger.info(f"Set pending_summarize_parameters for chat {chat_id}")
+    
+    # Check if summarize returned multiple topics
+    elif command_name == "summarize" and ("несколько тем" in response or "Какую тему" in response):
+        context.user_data["pending_topic"] = {
+            "command": "breakdown_topic",
+            "chat_id": chat_id,
+            "source": "summarize"
+        }
+        logger.info(f"Set pending_topic for chat {chat_id} from summarize")
+    
+    # Check if breakdown_topic needs clarification (multiple topics found)
+    elif command_name == "breakdown_topic" and ("Какую тему" in response or "несколько тем" in response):
+        context.user_data["pending_topic"] = {
+            "command": "breakdown_topic",
+            "chat_id": chat_id,
+            "source": "breakdown_topic"
+        }
+        logger.info(f"Set pending_topic for chat {chat_id} from breakdown_topic")
     
     # Reply to user
     await message_obj.reply_text(response)
@@ -307,9 +346,66 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
                 if not is_valid:
                     # Ask user to clarify invalid parameters
                     clarification = f"Прошу прощения, сэр/мадам. {error_message}"
+                    
+                    # Set appropriate pending flag based on command
+                    chat_id = update.message.chat.id
+                    if command_name == "summarize":
+                        if not parameters.get("message_count") and not parameters.get("time_window_hours"):
+                            context.user_data["pending_summarize_parameters"] = {
+                                "command": command_name,
+                                "chat_id": chat_id
+                            }
+                            logger.info(f"Set pending_summarize_parameters for chat {chat_id} due to validation failure in choice")
+                    elif command_name == "breakdown_topic":
+                        context.user_data["pending_topic"] = {
+                            "command": "breakdown_topic",
+                            "chat_id": chat_id,
+                            "source": "breakdown_topic"
+                        }
+                        logger.info(f"Set pending_topic for chat {chat_id} due to breakdown_topic validation failure in choice")
+                    
                     await update.message.reply_text(clarification)
                     # Keep pending_choice so user can provide corrected parameters
                     return True
+                
+                # Check if this is a topic selection (pending_choice contains topics)
+                topics = pending_choice.get("topics")
+                if topics and command_name == "breakdown_topic":
+                    # User selected a topic by number - get the topic and show breakdown
+                    selected_topic = topics[choice_num - 1] if 1 <= choice_num <= len(topics) else None
+                    if selected_topic:
+                        # Format breakdown response
+                        description = selected_topic.get("description", selected_topic.get("topic_handle", "Тема"))
+                        summary = selected_topic.get("summary", "")
+                        start_message_id = selected_topic.get("start_message", {}).get("message_id", 0)
+                        
+                        link_chat_id = str(abs(chat_id))
+                        if len(link_chat_id) > 10 and link_chat_id.startswith("100"):
+                            link_chat_id = link_chat_id[3:]
+                        message_link = f"https://t.me/c/{link_chat_id}/{start_message_id}" if start_message_id else ""
+                        
+                        response = f"Конечно, сэр/мадам. Вот что обсуждалось по теме **{description}**:\n\n"
+                        if message_link:
+                            response += f"[Начало обсуждения]({message_link})\n\n"
+                        
+                        if summary:
+                            points = summary.split("\n")
+                            formatted_points = []
+                            for point in points:
+                                point = point.strip()
+                                if point:
+                                    if point and point[0].isdigit():
+                                        point = point.split(".", 1)[-1].strip()
+                                    if point:
+                                        formatted_points.append(point)
+                            
+                            if formatted_points:
+                                for i, point in enumerate(formatted_points, 1):
+                                    response += f"{i}. {point}\n"
+                        
+                        del context.user_data["pending_choice"]
+                        await update.message.reply_text(response, parse_mode="Markdown")
+                        return True
                 
                 # Clear pending choice only after successful validation
                 del context.user_data["pending_choice"]
@@ -322,6 +418,20 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
                 response = await command_handler.execute_command(
                     command_name, parameters, bot=bot, chat_id=chat_id, user_id=user_id
                 )
+                
+                # Check if response needs pending flags
+                if command_name == "summarize" and ("несколько тем" in response or "Какую тему" in response):
+                    context.user_data["pending_topic"] = {
+                        "command": "breakdown_topic",
+                        "chat_id": chat_id,
+                        "source": "summarize"
+                    }
+                elif command_name == "breakdown_topic" and ("Какую тему" in response or "несколько тем" in response):
+                    context.user_data["pending_topic"] = {
+                        "command": "breakdown_topic",
+                        "chat_id": chat_id,
+                        "source": "breakdown_topic"
+                    }
                 
                 await update.message.reply_text(response)
                 return True
@@ -363,6 +473,24 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
         if not is_valid:
             # Ask user to clarify invalid parameters
             clarification = f"Прошу прощения, сэр/мадам. {error_message}"
+            
+            # Set appropriate pending flag based on command
+            chat_id = update.message.chat.id
+            if command_name == "summarize":
+                if not parameters.get("message_count") and not parameters.get("time_window_hours"):
+                    context.user_data["pending_summarize_parameters"] = {
+                        "command": command_name,
+                        "chat_id": chat_id
+                    }
+                    logger.info(f"Set pending_summarize_parameters for chat {chat_id} due to validation failure in confirmation")
+            elif command_name == "breakdown_topic":
+                context.user_data["pending_topic"] = {
+                    "command": "breakdown_topic",
+                    "chat_id": chat_id,
+                    "source": "breakdown_topic"
+                }
+                logger.info(f"Set pending_topic for chat {chat_id} due to breakdown_topic validation failure in confirmation")
+            
             await update.message.reply_text(clarification)
             # Keep pending command so user can provide corrected parameters
             return True
@@ -376,16 +504,33 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Execute the command
         response = await command_handler.execute_command(command_name, parameters, bot=bot, chat_id=chat_id, user_id=user_id, user_message=user_msg)
         
-        # Check if breakdown_topic needs clarification (multiple topics found)
-        if command_name == "breakdown_topic" and ("Какую тему" in response or "несколько тем" in response):
-            # Set pending_breakdown_topic so user's next response is processed as topic selection
-            context.user_data["pending_breakdown_topic"] = {
+        # Check response and set appropriate pending flags
+        
+        # Check if summarize needs parameters
+        if command_name == "summarize" and ("Я не смог определить параметры" in response or "укажите явно" in response):
+            context.user_data["pending_summarize_parameters"] = {
                 "command": command_name,
                 "chat_id": chat_id
             }
-            logger.info(f"Set pending_breakdown_topic for chat {chat_id} from confirmation")
+            logger.info(f"Set pending_summarize_parameters for chat {chat_id} from confirmation")
+        # Check if summarize returned multiple topics
+        elif command_name == "summarize" and ("несколько тем" in response or "Какую тему" in response):
+            context.user_data["pending_topic"] = {
+                "command": "breakdown_topic",
+                "chat_id": chat_id,
+                "source": "summarize"
+            }
+            logger.info(f"Set pending_topic for chat {chat_id} from summarize confirmation")
+        # Check if breakdown_topic needs clarification (multiple topics found)
+        elif command_name == "breakdown_topic" and ("Какую тему" in response or "несколько тем" in response):
+            context.user_data["pending_topic"] = {
+                "command": "breakdown_topic",
+                "chat_id": chat_id,
+                "source": "breakdown_topic"
+            }
+            logger.info(f"Set pending_topic for chat {chat_id} from breakdown_topic confirmation")
         else:
-            # Clear pending command only if not setting pending_breakdown_topic
+            # Clear pending command only if not setting pending flags
             if "pending_command" in context.user_data:
                 del context.user_data["pending_command"]
         
@@ -525,43 +670,218 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                     return
     
-    # Check if there's a pending breakdown_topic clarification
-    if context.user_data.get("pending_breakdown_topic"):
-        pending_bt = context.user_data["pending_breakdown_topic"]
-        command_name = pending_bt["command"]
-        chat_id = pending_bt.get("chat_id")
+    # Check if there's a pending summarize parameters request
+    if context.user_data.get("pending_summarize_parameters"):
+        pending_sp = context.user_data["pending_summarize_parameters"]
+        command_name = pending_sp["command"]
+        chat_id = pending_sp.get("chat_id")
         
         # Check if this is a reply to bot's message
         if is_reply_to_bot(update, context) and update.message:
             user_message = update.message.text
             
-            # Process user response as a new breakdown_topic request
-            # The user's message is treated as the topic_query
-            parameters = {"topic_query": user_message}
+            # Try to extract summarize parameters from user's message
+            extraction_result = chatgpt.extract_summarize_parameters(user_message)
             
-            # Execute breakdown_topic command with user's response
-            bot = context.bot
-            user_id = update.message.from_user.id if update.message.from_user else None
-            
-            response = await command_handler.execute_command(
-                command_name, 
-                parameters, 
-                bot=bot, 
-                chat_id=chat_id, 
-                user_id=user_id,
-                user_message=user_message
-            )
-            
-            # Check if response is asking for clarification again
-            if "Какую тему" in response or "несколько тем" in response:
-                # Still needs clarification - keep pending_breakdown_topic
-                await update.message.reply_text(response)
-                return
+            if extraction_result.get("success"):
+                # Parameters extracted successfully
+                parameters = {}
+                if extraction_result.get("message_count"):
+                    parameters["message_count"] = extraction_result["message_count"]
+                elif extraction_result.get("time_window_hours"):
+                    parameters["time_window_hours"] = extraction_result["time_window_hours"]
+                
+                # Validate parameters
+                is_valid, error_message = command_handler.validate_command(command_name, parameters)
+                if is_valid:
+                    # Execute summarize command with extracted parameters
+                    bot = context.bot
+                    user_id = update.message.from_user.id if update.message.from_user else None
+                    
+                    response = await command_handler.execute_command(
+                        command_name,
+                        parameters,
+                        bot=bot,
+                        chat_id=chat_id,
+                        user_id=user_id,
+                        user_message=user_message
+                    )
+                    
+                    # Check if response contains multiple topics (needs pending_topic)
+                    if "несколько тем" in response or "Какую тему" in response:
+                        context.user_data["pending_topic"] = {
+                            "command": "breakdown_topic",
+                            "chat_id": chat_id,
+                            "source": "summarize"
+                        }
+                    
+                    del context.user_data["pending_summarize_parameters"]
+                    await update.message.reply_text(response)
+                    return
+                else:
+                    # Validation failed - ask again
+                    await update.message.reply_text(f"Прошу прощения, сэр/мадам. {error_message}")
+                    return
             else:
-                # Topic was resolved - clear pending command
-                del context.user_data["pending_breakdown_topic"]
+                # Extraction failed - ask again
+                await update.message.reply_text(
+                    "Прошу прощения, сэр/мадам. Я всё ещё не смог определить параметры для суммирования.\n\n"
+                    "Пожалуйста, укажите явно:\n"
+                    "- Либо количество сообщений (например, 'последние 300 сообщений', минимум 15, максимум 1000)\n"
+                    "- Либо временной период (например, 'за последний час', 'за последние 3 часа', минимум 30 минут, максимум 24 часа)"
+                )
+                return
+    
+    # Check if there's a pending topic selection (from summarize or breakdown_topic)
+    if context.user_data.get("pending_topic"):
+        pending_topic = context.user_data["pending_topic"]
+        command_name = pending_topic.get("command", "breakdown_topic")
+        chat_id = pending_topic.get("chat_id")
+        # source = pending_topic.get("source")  # "summarize" or "breakdown_topic" - reserved for future use
+        
+        # Check if this is a reply to bot's message
+        if is_reply_to_bot(update, context) and update.message:
+            user_message = update.message.text
+            
+            # Get all topics from Redis
+            topic_handles = redis_client.get_all_topic_keys(chat_id)
+            if not topic_handles:
+                del context.user_data["pending_topic"]
+                await update.message.reply_text(
+                    "Прошу прощения, сэр/мадам, но сегодня не было обсуждений, которые можно разобрать."
+                )
+                return
+            
+            # Load all topics from Redis
+            topics = []
+            for topic_handle in topic_handles:
+                topic_data = redis_client.get_topic_summary(chat_id, topic_handle)
+                if topic_data:
+                    topics.append(topic_data)
+            
+            if not topics:
+                del context.user_data["pending_topic"]
+                await update.message.reply_text(
+                    "Прошу прощения, сэр/мадам, но не удалось загрузить темы обсуждения."
+                )
+                return
+            
+            # First, try to extract topic query from user message (for breakdown_topic)
+            topic_query = user_message
+            if command_name == "breakdown_topic":
+                extraction_result = chatgpt.extract_topic_query(user_message)
+                if extraction_result.get("success") and extraction_result.get("topic_query"):
+                    topic_query = extraction_result["topic_query"]
+                    logger.info(f"Extracted topic_query from user message: {topic_query}")
+                # If extraction fails, use original message (might be direct topic name or number)
+            
+            # Match topic query to topics using OpenAI
+            match_result = chatgpt.match_topic(topic_query, topics)
+            matched_topics = match_result.get("topics", [])
+            
+            # Filter by probability thresholds
+            high_prob_topics = [
+                t for t in matched_topics 
+                if t.get("probability", 0) >= COMMAND_PROBABILITY_HIGH_THRESHOLD
+            ]
+            low_prob_topics = [
+                t for t in matched_topics 
+                if COMMAND_PROBABILITY_LOW_THRESHOLD <= t.get("probability", 0) < COMMAND_PROBABILITY_HIGH_THRESHOLD
+            ]
+            
+            # If single high probability topic, show breakdown
+            if len(high_prob_topics) == 1:
+                topic = high_prob_topics[0]
+                # Format breakdown response
+                description = topic.get("description", topic.get("topic_handle", "Тема"))
+                summary = topic.get("summary", "")
+                start_message_id = topic.get("start_message", {}).get("message_id", 0)
+                
+                link_chat_id = str(abs(chat_id))
+                if len(link_chat_id) > 10 and link_chat_id.startswith("100"):
+                    link_chat_id = link_chat_id[3:]
+                message_link = f"https://t.me/c/{link_chat_id}/{start_message_id}" if start_message_id else ""
+                
+                response = f"Конечно, сэр/мадам. Вот что обсуждалось по теме **{description}**:\n\n"
+                if message_link:
+                    response += f"[Начало обсуждения]({message_link})\n\n"
+                
+                if summary:
+                    points = summary.split("\n")
+                    formatted_points = []
+                    for point in points:
+                        point = point.strip()
+                        if point:
+                            if point and point[0].isdigit():
+                                point = point.split(".", 1)[-1].strip()
+                            if point:
+                                formatted_points.append(point)
+                    
+                    if formatted_points:
+                        for i, point in enumerate(formatted_points, 1):
+                            response += f"{i}. {point}\n"
+                
+                del context.user_data["pending_topic"]
+                await update.message.reply_text(response, parse_mode="Markdown")
+                return
+            
+            # If multiple high probability topics with same/similar probability, use pending_choice
+            if len(high_prob_topics) > 1:
+                # Check if probabilities are very close (within 5%)
+                prob_values = [t.get("probability", 0) for t in high_prob_topics]
+                max_prob = max(prob_values)
+                similar_probs = [t for t in high_prob_topics if abs(t.get("probability", 0) - max_prob) <= 5]
+                
+                if len(similar_probs) > 1:
+                    # Multiple topics with similar probability - use pending_choice
+                    context.user_data["pending_choice"] = {
+                        "commands": ["breakdown_topic"] * len(similar_probs),
+                        "parameters": [{"topic_query": t.get("description", t.get("topic_handle", ""))} for t in similar_probs],
+                        "topics": similar_probs
+                    }
+                    del context.user_data["pending_topic"]
+                    
+                    response = "Конечно, сэр/мадам. Найдено несколько тем с одинаковой вероятностью:\n\n"
+                    for i, topic in enumerate(similar_probs, 1):
+                        description = topic.get("description", topic.get("topic_handle", "Тема"))
+                        message_count = topic.get("message_count", 0)
+                        response += f"{i}. {description} ({message_count} сообщений)\n"
+                    response += "\nКакую тему вы хотите, чтобы я разобрал подробнее?"
+                    
+                    await update.message.reply_text(response)
+                    return
+                else:
+                    # Multiple topics but one is clearly higher - ask to choose
+                    response = "Конечно, сэр/мадам. Найдено несколько тем, соответствующих вашему запросу:\n\n"
+                    for i, topic in enumerate(high_prob_topics, 1):
+                        description = topic.get("description", topic.get("topic_handle", "Тема"))
+                        message_count = topic.get("message_count", 0)
+                        response += f"{i}. {description} ({message_count} сообщений)\n"
+                    response += "\nКакую тему вы хотите, чтобы я разобрал подробнее?"
+                    
+                    # Keep pending_topic for next response
+                    await update.message.reply_text(response)
+                    return
+            
+            # If some low probability topics, ask user to choose
+            if low_prob_topics:
+                response = "Конечно, сэр/мадам. Найдено несколько тем, соответствующих вашему запросу:\n\n"
+                for i, topic in enumerate(low_prob_topics, 1):
+                    description = topic.get("description", topic.get("topic_handle", "Тема"))
+                    message_count = topic.get("message_count", 0)
+                    response += f"{i}. {description} ({message_count} сообщений)\n"
+                response += "\nКакую тему вы хотите, чтобы я разобрал подробнее?"
+                
+                # Keep pending_topic for next response
                 await update.message.reply_text(response)
                 return
+            
+            # No matching topics
+            del context.user_data["pending_topic"]
+            await update.message.reply_text(
+                "Прошу прощения, сэр/мадам, но сегодня не обсуждались темы, соответствующие вашему запросу."
+            )
+            return
     
     # Store message for tracking (only if not silenced and user is not ignored)
     if not is_silenced and message_obj.from_user:
