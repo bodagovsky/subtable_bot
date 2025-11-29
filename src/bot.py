@@ -237,6 +237,15 @@ async def execute_command_directly(
         command_name, parameters, bot=bot, chat_id=chat_id, user_id=user_id, user_message=user_message
     )
     
+    # Check if breakdown_topic needs clarification (multiple topics found)
+    if command_name == "breakdown_topic" and ("Какую тему" in response or "несколько тем" in response):
+        # Set pending_breakdown_topic so user's next response is processed as topic selection
+        context.user_data["pending_breakdown_topic"] = {
+            "command": command_name,
+            "chat_id": chat_id
+        }
+        logger.info(f"Set pending_breakdown_topic for chat {chat_id}")
+    
     # Reply to user
     await message_obj.reply_text(response)
     return True
@@ -367,8 +376,18 @@ async def handle_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE
         # Execute the command
         response = await command_handler.execute_command(command_name, parameters, bot=bot, chat_id=chat_id, user_id=user_id, user_message=user_msg)
         
-        # Clear pending command
-        del context.user_data["pending_command"]
+        # Check if breakdown_topic needs clarification (multiple topics found)
+        if command_name == "breakdown_topic" and ("Какую тему" in response or "несколько тем" in response):
+            # Set pending_breakdown_topic so user's next response is processed as topic selection
+            context.user_data["pending_breakdown_topic"] = {
+                "command": command_name,
+                "chat_id": chat_id
+            }
+            logger.info(f"Set pending_breakdown_topic for chat {chat_id} from confirmation")
+        else:
+            # Clear pending command only if not setting pending_breakdown_topic
+            if "pending_command" in context.user_data:
+                del context.user_data["pending_command"]
         
         # Reply to user's confirmation message
         await update.message.reply_text(response)
@@ -505,6 +524,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "например: 'за последний день', 'за последние 3 часа', 'за прошлую неделю' (максимум одна неделя)."
                     )
                     return
+    
+    # Check if there's a pending breakdown_topic clarification
+    if context.user_data.get("pending_breakdown_topic"):
+        pending_bt = context.user_data["pending_breakdown_topic"]
+        command_name = pending_bt["command"]
+        chat_id = pending_bt.get("chat_id")
+        
+        # Check if this is a reply to bot's message
+        if is_reply_to_bot(update, context) and update.message:
+            user_message = update.message.text
+            
+            # Process user response as a new breakdown_topic request
+            # The user's message is treated as the topic_query
+            parameters = {"topic_query": user_message}
+            
+            # Execute breakdown_topic command with user's response
+            bot = context.bot
+            user_id = update.message.from_user.id if update.message.from_user else None
+            
+            response = await command_handler.execute_command(
+                command_name, 
+                parameters, 
+                bot=bot, 
+                chat_id=chat_id, 
+                user_id=user_id,
+                user_message=user_message
+            )
+            
+            # Check if response is asking for clarification again
+            if "Какую тему" in response or "несколько тем" in response:
+                # Still needs clarification - keep pending_breakdown_topic
+                await update.message.reply_text(response)
+                return
+            else:
+                # Topic was resolved - clear pending command
+                del context.user_data["pending_breakdown_topic"]
+                await update.message.reply_text(response)
+                return
     
     # Store message for tracking (only if not silenced and user is not ignored)
     if not is_silenced and message_obj.from_user:
