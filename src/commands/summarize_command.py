@@ -29,15 +29,17 @@ class SummarizeCommand(BaseCommand):
         self.chatgpt = ChatGPTClient()
     
     def validate_parameters(self, parameters: dict = None) -> tuple[bool, str | None]:
-        """Validate parameters (message_count or time_window_hours)."""
+        """Validate parameters (message_count or time_window_hours).
+        
+        Note: This method allows missing parameters - extraction will happen in execute().
+        """
         params = parameters or {}
         
         message_count = params.get("message_count")
         time_window_hours = params.get("time_window_hours")
         
-        # Must have either message_count or time_window_hours
-        if not message_count and not time_window_hours:
-            return False, "Пожалуйста, укажите либо количество сообщений (например, 'последние 300 сообщений'), либо временной период (например, 'за последний час')."
+        # Allow missing parameters - they will be extracted in execute() if user_message is provided
+        # Only validate if parameters are already provided
         
         # Validate message_count if provided
         if message_count is not None:
@@ -71,7 +73,8 @@ class SummarizeCommand(BaseCommand):
         self, 
         parameters: dict = None, 
         bot: Optional[Bot] = None, 
-        chat_id: Optional[int] = None
+        chat_id: Optional[int] = None,
+        user_message: Optional[str] = None
     ) -> str:
         """
         Execute the summarize command.
@@ -80,6 +83,7 @@ class SummarizeCommand(BaseCommand):
             parameters: Dictionary with 'message_count' (int) or 'time_window_hours' (float)
             bot: Telegram bot instance
             chat_id: Chat ID
+            user_message: Original user message (for parameter extraction if needed)
             
         Returns:
             Response message with summary or topic list
@@ -88,6 +92,67 @@ class SummarizeCommand(BaseCommand):
             return "Прошу прощения, сэр/мадам, но контекст чата недоступен для этой команды."
         
         params = parameters or {}
+        message_count = params.get("message_count")
+        time_window_hours = params.get("time_window_hours")
+        
+        # Step 1: If parameters are not provided, try to extract from user message
+        if not message_count and not time_window_hours and user_message:
+            logger.info(f"Attempting to extract summarize parameters from user message: {user_message}")
+            extraction_result = self.chatgpt.extract_summarize_parameters(user_message)
+            
+            if extraction_result.get("success"):
+                # Parameters extracted successfully
+                if extraction_result.get("message_count"):
+                    message_count = extraction_result["message_count"]
+                    params["message_count"] = message_count
+                elif extraction_result.get("time_window_hours"):
+                    time_window_hours = extraction_result["time_window_hours"]
+                    params["time_window_hours"] = time_window_hours
+                logger.info(f"Extracted parameters: message_count={message_count}, time_window_hours={time_window_hours}")
+            else:
+                # Extraction failed - ask user to provide explicitly
+                reasoning = extraction_result.get("reasoning", "Не удалось определить параметры")
+                logger.info(f"Parameter extraction failed: {reasoning}")
+                return (
+                    "Прошу прощения, сэр/мадам. Я не смог определить параметры для суммирования из вашего сообщения.\n\n"
+                    "Пожалуйста, укажите явно:\n"
+                    "- Либо количество сообщений (например, 'последние 300 сообщений', минимум 15, максимум 1000)\n"
+                    "- Либо временной период (например, 'за последний час', 'за последние 3 часа', минимум 30 минут, максимум 24 часа)"
+                )
+        
+        # Step 2: Validate parameters (convert types and check constraints)
+        if message_count is not None:
+            try:
+                message_count = int(message_count)
+                if message_count < 15:
+                    return "Минимальное количество сообщений для анализа: 15. Пожалуйста, укажите не менее 15 сообщений."
+                if message_count > 1000:
+                    return "Максимальное количество сообщений для анализа: 1000. Пожалуйста, укажите не более 1000 сообщений."
+                params["message_count"] = message_count
+            except (ValueError, TypeError):
+                return "Количество сообщений должно быть целым числом. Пожалуйста, укажите корректное количество (например, '300 сообщений')."
+        
+        if time_window_hours is not None:
+            try:
+                time_window_hours = float(time_window_hours)
+                if time_window_hours < 0.5:
+                    return "Минимальный временной период для анализа: 30 минут. Пожалуйста, укажите период не менее 30 минут."
+                if time_window_hours > 24:
+                    return "Максимальный временной период для анализа: 24 часа. Пожалуйста, укажите период не более 24 часов."
+                params["time_window_hours"] = time_window_hours
+            except (ValueError, TypeError):
+                return "Временной период должен быть числом. Пожалуйста, укажите корректный период (например, 'за последний час' или 'за последние 3 часа')."
+        
+        # Step 3: If still no parameters, ask user to provide explicitly
+        if not message_count and not time_window_hours:
+            return (
+                "Прошу прощения, сэр/мадам. Для суммирования необходимо указать параметры.\n\n"
+                "Пожалуйста, укажите:\n"
+                "- Либо количество сообщений (например, 'последние 300 сообщений', минимум 15, максимум 1000)\n"
+                "- Либо временной период (например, 'за последний час', 'за последние 3 часа', минимум 30 минут, максимум 24 часа)"
+            )
+        
+        # Step 4: Update local variables from validated params
         message_count = params.get("message_count")
         time_window_hours = params.get("time_window_hours")
         
