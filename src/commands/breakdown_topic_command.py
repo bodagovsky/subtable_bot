@@ -38,7 +38,8 @@ class BreakdownTopicCommand(BaseCommand):
         self, 
         parameters: Dict = None, 
         bot: Optional[Bot] = None, 
-        chat_id: Optional[int] = None
+        chat_id: Optional[int] = None,
+        user_message: Optional[str] = None
     ) -> str:
         """
         Execute the breakdown_topic command.
@@ -47,6 +48,7 @@ class BreakdownTopicCommand(BaseCommand):
             parameters: Dictionary with 'topic_query' (str)
             bot: Telegram bot instance
             chat_id: Chat ID
+            user_message: Original user message (for parameter extraction if needed)
             
         Returns:
             Response message with topic breakdown or topic selection
@@ -56,6 +58,11 @@ class BreakdownTopicCommand(BaseCommand):
         
         params = parameters or {}
         topic_query = params.get("topic_query", "").strip()
+        
+        # Step 1: If topic_query is not provided, try to extract from user_message
+        if not topic_query and user_message:
+            logger.info(f"Attempting to extract topic_query from user message: {user_message}")
+            topic_query = user_message.strip()
         
         if not topic_query:
             return "Прошу прощения, сэр/мадам, но вы не указали тему. Пожалуйста, укажите тему, которую вы хотите разобрать."
