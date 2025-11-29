@@ -439,6 +439,103 @@ class ChatGPTClient:
                 "reasoning": f"Ошибка при извлечении параметров: {str(e)}"
             }
     
+    def extract_topic_query(self, user_message: str) -> dict:
+        """
+        Extract topic query from user message for breakdown_topic command.
+        
+        Args:
+            user_message: The user's message containing topic information
+            
+        Returns:
+            dict with 'topic_query' (str or None) and 'success' (bool)
+        """
+        prompt = f"""Извлеките название темы обсуждения из этого сообщения пользователя: "{user_message}"
+
+Пользователь хочет разобрать конкретную тему обсуждения. Извлеките название темы из сообщения.
+
+Примеры на русском:
+- "разбери тему про загрязнение воздуха" → "загрязнение воздуха"
+- "что обсуждали про политику" → "политика"
+- "расскажи про загрязнение" → "загрязнение"
+- "разбери тему загрязнение воздуха" → "загрязнение воздуха"
+- "загрязнение воздуха" → "загрязнение воздуха"
+- "про загрязнение" → "загрязнение"
+- "тема про политику" → "политика"
+- "разобрать тему новости" → "новости"
+- "что говорили про здоровье" → "здоровье"
+- "разбери загрязнение" → "загрязнение"
+- "подробнее про политику" → "политика"
+- "тема загрязнение" → "загрязнение"
+- "обсуждение про здоровье" → "здоровье"
+
+ВАЖНО:
+- Извлеките ТОЛЬКО название темы, без лишних слов
+- Уберите слова-маркеры: "разбери", "тема", "про", "что обсуждали", "расскажи", "разобрать", "подробнее", "обсуждение" и т.д.
+- Верните чистое название темы (1-5 слов, обычно 2-3 слова)
+- Сохраните оригинальную формулировку темы (не меняйте слова)
+- Если пользователь указал только номер темы (например, "тема 1" или просто "1"), верните null и success: false
+- Если сообщение содержит только общие слова без конкретной темы (например, "разбери тему" без указания какой), верните null и success: false
+- Если не удалось извлечь тему, верните null и success: false
+- Верните success: true только если уверены, что извлекли конкретное название темы
+
+Отвечайте в формате JSON:
+{{
+    "topic_query": <название темы или null>,
+    "success": <true или false>,
+    "reasoning": "краткое объяснение того, что было извлечено или почему не удалось"
+}}"""
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.3
+            )
+            
+            import json
+            result = json.loads(response.choices[0].message.content)
+            
+            # Validate the result
+            topic_query = result.get("topic_query")
+            success = result.get("success", False)
+            
+            # Additional validation
+            if topic_query:
+                topic_query = topic_query.strip()
+                # Check if it's not empty and not just a number
+                if topic_query and not topic_query.isdigit():
+                    # Check length (should be reasonable, not too short or too long)
+                    if 2 <= len(topic_query) <= 100:
+                        result["topic_query"] = topic_query
+                        result["success"] = True
+                    else:
+                        result["topic_query"] = None
+                        result["success"] = False
+                        result["reasoning"] = f"Название темы должно быть от 2 до 100 символов, получено: {len(topic_query)}"
+                else:
+                    result["topic_query"] = None
+                    result["success"] = False
+                    if not result.get("reasoning"):
+                        result["reasoning"] = "Название темы не может быть пустым или числом"
+            else:
+                result["success"] = False
+                if not result.get("reasoning"):
+                    result["reasoning"] = "Не удалось извлечь название темы"
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error extracting topic query: {e}")
+            return {
+                "topic_query": None,
+                "success": False,
+                "reasoning": f"Ошибка при извлечении темы: {str(e)}"
+            }
+    
     def generate_response(self, user_message: str) -> str:
         """Generate a conversational response when no command is matched."""
         try:

@@ -766,8 +766,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 return
             
-            # Match user message to topics using OpenAI
-            match_result = chatgpt.match_topic(user_message, topics)
+            # First, try to extract topic query from user message (for breakdown_topic)
+            topic_query = user_message
+            if command_name == "breakdown_topic":
+                extraction_result = chatgpt.extract_topic_query(user_message)
+                if extraction_result.get("success") and extraction_result.get("topic_query"):
+                    topic_query = extraction_result["topic_query"]
+                    logger.info(f"Extracted topic_query from user message: {topic_query}")
+                # If extraction fails, use original message (might be direct topic name or number)
+            
+            # Match topic query to topics using OpenAI
+            match_result = chatgpt.match_topic(topic_query, topics)
             matched_topics = match_result.get("topics", [])
             
             # Filter by probability thresholds
