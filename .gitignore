@@ -37,3 +37,5 @@ wheels/
 .DS_Store
 Thumbs.db
 
+#Telegram session
+*.session

@@ -62,7 +62,7 @@ class CommandHandler:
         command = self.commands[command_name]
         return command.validate_parameters(parameters)
     
-    async def execute_command(self, command_name: str, parameters: dict = None, bot=None, chat_id: int = None, user_id: int = None) -> str:
+    async def execute_command(self, command_name: str, parameters: dict = None, bot=None, chat_id: int = None, user_id: int = None, user_message: str = None) -> str:
         """
         Execute a command by name.
         
@@ -72,6 +72,7 @@ class CommandHandler:
             bot: Optional bot instance (for commands that need it)
             chat_id: Optional chat ID (for commands that need it)
             user_id: Optional user ID (for commands that need it)
+            user_message: Optional original user message (for parameter extraction)
             
         Returns:
             Response message
@@ -86,7 +87,7 @@ class CommandHandler:
         
         try:
             command = self.commands[command_name]
-            # Check if command needs bot/chat_id/user_id (has execute signature with these params)
+            # Check if command needs bot/chat_id/user_id/user_message (has execute signature with these params)
             import inspect
             sig = inspect.signature(command.execute)
             params_to_pass = {}
@@ -96,6 +97,8 @@ class CommandHandler:
                 params_to_pass['chat_id'] = chat_id
             if 'user_id' in sig.parameters:
                 params_to_pass['user_id'] = user_id
+            if 'user_message' in sig.parameters:
+                params_to_pass['user_message'] = user_message
             
             if params_to_pass:
                 return await command.execute(parameters, **params_to_pass)

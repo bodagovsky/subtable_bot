@@ -24,7 +24,7 @@ class BreakdownTopicCommand(BaseCommand):
         )
         self.chatgpt = ChatGPTClient()
     
-    def validate_parameters(self, parameters: dict = None) -> tuple[bool, str | None]:
+    def validate_parameters(self, parameters: Dict = None) -> tuple[bool, str | None]:
         """Validate that topic query is provided."""
         params = parameters or {}
         topic_query = params.get("topic_query")
@@ -36,7 +36,7 @@ class BreakdownTopicCommand(BaseCommand):
     
     async def execute(
         self, 
-        parameters: dict = None, 
+        parameters: Dict = None, 
         bot: Optional[Bot] = None, 
         chat_id: Optional[int] = None
     ) -> str:
@@ -111,7 +111,7 @@ class BreakdownTopicCommand(BaseCommand):
             logger.error(f"Error in BreakdownTopic command: {e}")
             return f"Прошу прощения, сэр/мадам, но произошла ошибка при выполнении команды: {str(e)}"
     
-    def _format_topic_breakdown(self, topic: dict, chat_id: int) -> str:
+    def _format_topic_breakdown(self, topic: Dict, chat_id: int) -> str:
         """Format topic breakdown response."""
         description = topic.get("description", topic.get("topic_handle", "Тема"))
         summary = topic.get("summary", "")
@@ -150,7 +150,7 @@ class BreakdownTopicCommand(BaseCommand):
         
         return response
     
-    def _format_topic_selection(self, topics: List[dict], chat_id: int) -> str:
+    def _format_topic_selection(self, topics: List[Dict], chat_id: int) -> str:
         """Format topic selection response when multiple topics match."""
         response = "Конечно, сэр/мадам. Найдено несколько тем, соответствующих вашему запросу:\n\n"
         

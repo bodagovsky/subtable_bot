@@ -340,6 +340,106 @@ class ChatGPTClient:
                 "reasoning": f"Ошибка при извлечении временного периода: {str(e)}"
             }
     
+    def extract_summarize_parameters(self, user_message: str) -> dict:
+        """
+        Extract summarize parameters (time_window_hours or message_count) from user message.
+        
+        Args:
+            user_message: The user's message containing time window or message count information
+            
+        Returns:
+            dict with 'message_count' (int or None), 'time_window_hours' (float or None), and 'success' (bool)
+        """
+        prompt = f"""Извлеките параметры для команды суммирования из этого сообщения пользователя: "{user_message}"
+
+Пользователь хочет суммировать сообщения. Извлеките либо количество сообщений, либо временной период.
+
+Параметры:
+1. Количество сообщений (message_count): целое число от 15 до 1000
+   Примеры: "последние 300 сообщений", "300 сообщений", "за 100 сообщений"
+   
+2. Временной период (time_window_hours): число в часах от 0.5 (30 минут) до 24 часов
+   Примеры на русском:
+   - "за последний час" = 1 час
+   - "за последние 2 часа" = 2 часа
+   - "за последние 30 минут" = 0.5 часа
+   - "за последние 3 часа" = 3 часа
+   - "за день" = 24 часа
+   - "за последние 12 часов" = 12 часов
+   
+ВАЖНО:
+- Извлеките ТОЛЬКО ОДИН параметр: либо message_count, либо time_window_hours
+- Если указаны оба, приоритет у message_count
+- Минимум: 15 сообщений или 0.5 часа (30 минут)
+- Максимум: 1000 сообщений или 24 часа
+- Верните null для параметра, который не был найден
+- Верните success: false, если не удалось извлечь ни один параметр
+
+Отвечайте в формате JSON:
+{{
+    "message_count": <целое число от 15 до 1000 или null>,
+    "time_window_hours": <число в часах от 0.5 до 24 или null>,
+    "success": <true или false>,
+    "reasoning": "краткое объяснение"
+}}"""
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.3
+            )
+            
+            import json
+            result = json.loads(response.choices[0].message.content)
+            
+            # Validate the result
+            message_count = result.get("message_count")
+            time_window_hours = result.get("time_window_hours")
+            success = False
+            
+            # Validate message_count if provided
+            if message_count is not None:
+                try:
+                    message_count = int(message_count)
+                    if 15 <= message_count <= 1000:
+                        result["message_count"] = message_count
+                        success = True
+                    else:
+                        result["message_count"] = None
+                        result["reasoning"] = f"Количество сообщений должно быть от 15 до 1000, получено: {message_count}"
+                except (ValueError, TypeError):
+                    result["message_count"] = None
+            
+            # Validate time_window_hours if provided
+            if time_window_hours is not None:
+                try:
+                    time_window_hours = float(time_window_hours)
+                    if 0.5 <= time_window_hours <= 24:
+                        result["time_window_hours"] = time_window_hours
+                        success = True
+                    else:
+                        result["time_window_hours"] = None
+                        if not success:
+                            result["reasoning"] = f"Временной период должен быть от 0.5 до 24 часов, получено: {time_window_hours}"
+                except (ValueError, TypeError):
+                    result["time_window_hours"] = None
+            
+            result["success"] = success
+            return result
+            
+        except Exception as e:
+            return {
+                "message_count": None,
+                "time_window_hours": None,
+                "success": False,
+                "reasoning": f"Ошибка при извлечении параметров: {str(e)}"
+            }
+    
     def generate_response(self, user_message: str) -> str:
         """Generate a conversational response when no command is matched."""
         try:
