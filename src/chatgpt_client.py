@@ -1,6 +1,5 @@
 """ChatGPT/OpenAI API client for natural language processing."""
 import logging
-from subprocess import list2cmdline
 from openai import OpenAI
 from config import OPENAI_API_KEY, OPENAI_MODEL, SYSTEM_PROMPT
 
