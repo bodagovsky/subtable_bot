@@ -3,7 +3,7 @@ import os
 import logging
 from typing import List, Optional
 from telethon import TelegramClient
-from telethon.tl.types import Message, PeerChannel
+from telethon.tl.types import Message, PeerChannel, PeerUser
 from telethon.errors import MessageIdInvalidError, ChannelInvalidError, ChatInvalidError
 from config import TELEGRAM_BOT_TOKEN
 
@@ -83,7 +83,10 @@ class MTProtoClient:
             if not self.client.is_connected():
                 await self.start()
 
-            entity = await self.client.get_entity(PeerChannel(chat_id))
+            try:
+                entity = await self.client.get_entity(PeerChannel(chat_id))
+            except Exception:
+                entity = await self.client.get_entity(PeerUser(chat_id))
             
             # Get messages using get_messages
             # Telethon's get_messages can handle multiple message IDs at once
