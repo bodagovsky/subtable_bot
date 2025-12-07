@@ -7,6 +7,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.state_machine import Event
 from redis_client import redis_client
 from chatgpt_client import ChatGPTClient
 from config import COMMAND_PROBABILITY_HIGH_THRESHOLD, COMMAND_PROBABILITY_LOW_THRESHOLD
@@ -44,32 +45,40 @@ class BreakdownTopicCommand(BaseCommand):
     async def execute(
         self, 
         parameters: Dict = None, 
-        bot: Optional[Bot] = None, 
-        chat_id: Optional[int] = None,
-        user_message: Optional[str] = None
-    ) -> str:
+        update=None,
+        context=None,
+        chatgpt_client=None
+    ) -> Event:
         """
         Execute the breakdown_topic command.
         
         Args:
             parameters: Dictionary with 'topic_query' (str)
-            bot: Telegram bot instance
-            chat_id: Chat ID
-            user_message: Original user message (for parameter extraction if needed)
+            update: Telegram Update object
+            context: Bot context
+            chatgpt_client: ChatGPT client instance
             
         Returns:
-            Response message with topic breakdown or topic selection
+            Event enum
         """
+        message_obj = update.message if update.message else update.channel_post
+        if not message_obj:
+            return Event.COMMAND_EXECUTED
+        
+        chat_id = message_obj.chat.id
+        user_message = message_obj.text if message_obj.text else None
+        
         if not chat_id:
-            return "Прошу прощения, сэр/мадам, но контекст чата недоступен для этой команды."
+            await message_obj.reply_text("Прошу прощения, сэр/мадам, но контекст чата недоступен для этой команды.")
+            return Event.COMMAND_EXECUTED
         
         params = parameters or {}
         topic_query = params.get("topic_query", "").strip()
         
         # Step 1: If topic_query is not provided, try to extract from user_message using OpenAI
-        if not topic_query and user_message:
+        if not topic_query and user_message and chatgpt_client:
             logger.info(f"Attempting to extract topic_query from user message: {user_message}")
-            extraction_result = self.chatgpt.extract_topic_query(user_message)
+            extraction_result = chatgpt_client.extract_topic_query(user_message)
             
             if extraction_result.get("success") and extraction_result.get("topic_query"):
                 # Topic query extracted successfully
@@ -80,20 +89,23 @@ class BreakdownTopicCommand(BaseCommand):
                 # Extraction failed - ask user to provide explicitly
                 reasoning = extraction_result.get("reasoning", "Не удалось определить тему")
                 logger.info(f"Topic query extraction failed: {reasoning}")
-                return (
+                await message_obj.reply_text(
                     "Прошу прощения, сэр/мадам. Я не смог определить тему из вашего сообщения.\n\n"
                     "Пожалуйста, укажите явно тему, которую вы хотите разобрать (например, 'загрязнение воздуха', 'политика', 'новости')."
                 )
+                return Event.PARAMETERS_UNCLEAR
         
         if not topic_query:
-            return "Прошу прощения, сэр/мадам, но вы не указали тему. Пожалуйста, укажите тему, которую вы хотите разобрать."
+            await message_obj.reply_text("Прошу прощения, сэр/мадам, но вы не указали тему. Пожалуйста, укажите тему, которую вы хотите разобрать.")
+            return Event.PARAMETERS_UNCLEAR
         
         try:
             # Get all topic keys for this channel
             topic_handles = redis_client.get_all_topic_keys(chat_id)
             
             if not topic_handles:
-                return "Прошу прощения, сэр/мадам, но сегодня не было обсуждений, которые можно разобрать."
+                await message_obj.reply_text("Прошу прощения, сэр/мадам, но сегодня не было обсуждений, которые можно разобрать.")
+                return Event.COMMAND_EXECUTED
             
             # Load all topics from Redis
             topics = []
@@ -103,10 +115,15 @@ class BreakdownTopicCommand(BaseCommand):
                     topics.append(topic_data)
             
             if not topics:
-                return "Прошу прощения, сэр/мадам, но не удалось загрузить темы обсуждения."
+                await message_obj.reply_text("Прошу прощения, сэр/мадам, но не удалось загрузить темы обсуждения.")
+                return Event.COMMAND_EXECUTED
             
             # Match user query to topics using OpenAI
-            match_result = self.chatgpt.match_topic(topic_query, topics)
+            if not chatgpt_client:
+                await message_obj.reply_text("Прошу прощения, сэр/мадам, но сервис недоступен.")
+                return Event.COMMAND_EXECUTED
+            
+            match_result = chatgpt_client.match_topic(topic_query, topics)
             matched_topics = match_result.get("topics", [])
             
             # Filter by probability thresholds
@@ -122,22 +139,30 @@ class BreakdownTopicCommand(BaseCommand):
             # If single high probability topic, show breakdown
             if len(high_prob_topics) == 1:
                 topic = high_prob_topics[0]
-                return self._format_topic_breakdown(topic, chat_id)
+                response = self._format_topic_breakdown(topic, chat_id)
+                await message_obj.reply_text(response, parse_mode="Markdown")
+                return Event.COMMAND_EXECUTED
             
             # If multiple high probability topics, ask user to choose
             if len(high_prob_topics) > 1:
-                return self._format_topic_selection(high_prob_topics, chat_id)
+                response = self._format_topic_selection(high_prob_topics, chat_id)
+                await message_obj.reply_text(response)
+                return Event.PARAMETERS_UNCLEAR
             
             # If some low probability topics, ask user to choose
             if low_prob_topics:
-                return self._format_topic_selection(low_prob_topics, chat_id)
+                response = self._format_topic_selection(low_prob_topics, chat_id)
+                await message_obj.reply_text(response)
+                return Event.PARAMETERS_UNCLEAR
             
             # No matching topics
-            return "Прошу прощения, сэр/мадам, но сегодня не обсуждались темы, соответствующие вашему запросу."
+            await message_obj.reply_text("Прошу прощения, сэр/мадам, но сегодня не обсуждались темы, соответствующие вашему запросу.")
+            return Event.PARAMETERS_UNCLEAR
             
         except Exception as e:
             logger.error(f"Error in BreakdownTopic command: {e}")
-            return f"Прошу прощения, сэр/мадам, но произошла ошибка при выполнении команды: {str(e)}"
+            await message_obj.reply_text(f"Прошу прощения, сэр/мадам, но произошла ошибка при выполнении команды: {str(e)}")
+            return Event.COMMAND_EXECUTED
     
     def _format_topic_breakdown(self, topic: Dict, chat_id: int) -> str:
         """Format topic breakdown response."""

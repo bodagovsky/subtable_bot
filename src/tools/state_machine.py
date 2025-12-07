@@ -12,15 +12,17 @@ class Event(Enum):
 
 class UserState(Enum):
     INIT = 0
-    PENDING_COMMAND_CLARFIFICATION = 1
-    PENDING_COMMAND_PARAMETERS = 2
+    PENDING_COMMAND_CLARIFICATION = 1
+    PENDING_PARAMETERS_CLARIFICATION = 2
     IGNORED = 3
 
 
 class StateMachine:
     def __init__(self) -> None:
         transitions = []
-        with open("src/statemachine/transitions.json") as transitions_file:
+        import os
+        transitions_path = os.path.join(os.path.dirname(__file__), "transitions.json")
+        with open(transitions_path) as transitions_file:
             import json
             transitions = json.loads(transitions_file.read())
         
@@ -39,3 +41,4 @@ class StateMachine:
             return None
 
 
+state_machine = StateMachine()

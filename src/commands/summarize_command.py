@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import pytz
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.state_machine import Event
 from redis_client import redis_client
 from mtproto_client import get_mtproto_client
 from chatgpt_client import ChatGPTClient
@@ -72,33 +73,41 @@ class SummarizeCommand(BaseCommand):
     async def execute(
         self, 
         parameters: dict = None, 
-        bot: Optional[Bot] = None, 
-        chat_id: Optional[int] = None,
-        user_message: Optional[str] = None
-    ) -> str:
+        update=None,
+        context=None,
+        chatgpt_client=None
+    ) -> Event:
         """
         Execute the summarize command.
         
         Args:
             parameters: Dictionary with 'message_count' (int) or 'time_window_hours' (float)
-            bot: Telegram bot instance
-            chat_id: Chat ID
-            user_message: Original user message (for parameter extraction if needed)
+            update: Telegram Update object
+            context: Bot context
+            chatgpt_client: ChatGPT client instance
             
         Returns:
-            Response message with summary or topic list
+            Event enum
         """
+        message_obj = update.message if update.message else update.channel_post
+        if not message_obj:
+            return Event.COMMAND_EXECUTED
+        
+        chat_id = message_obj.chat.id
+        user_message = message_obj.text if message_obj.text else None
+        
         if not chat_id:
-            return "Прошу прощения, сэр/мадам, но контекст чата недоступен для этой команды."
+            await message_obj.reply_text("Прошу прощения, сэр/мадам, но контекст чата недоступен для этой команды.")
+            return Event.COMMAND_EXECUTED
         
         params = parameters or {}
         message_count = params.get("message_count")
         time_window_hours = params.get("time_window_hours")
         
         # Step 1: If parameters are not provided, try to extract from user message
-        if not message_count and not time_window_hours and user_message:
+        if not message_count and not time_window_hours and user_message and chatgpt_client:
             logger.info(f"Attempting to extract summarize parameters from user message: {user_message}")
-            extraction_result = self.chatgpt.extract_summarize_parameters(user_message)
+            extraction_result = chatgpt_client.extract_summarize_parameters(user_message)
             
             if extraction_result.get("success"):
                 # Parameters extracted successfully
@@ -113,44 +122,52 @@ class SummarizeCommand(BaseCommand):
                 # Extraction failed - ask user to provide explicitly
                 reasoning = extraction_result.get("reasoning", "Не удалось определить параметры")
                 logger.info(f"Parameter extraction failed: {reasoning}")
-                return (
+                await message_obj.reply_text(
                     "Прошу прощения, сэр/мадам. Я не смог определить параметры для суммирования из вашего сообщения.\n\n"
                     "Пожалуйста, укажите явно:\n"
                     "- Либо количество сообщений (например, 'последние 300 сообщений', минимум 15, максимум 1000)\n"
                     "- Либо временной период (например, 'за последний час', 'за последние 3 часа', минимум 30 минут, максимум 24 часа)"
                 )
+                return Event.PARAMETERS_UNCLEAR
         
         # Step 2: Validate parameters (convert types and check constraints)
         if message_count is not None:
             try:
                 message_count = int(message_count)
                 if message_count < 15:
-                    return "Минимальное количество сообщений для анализа: 15. Пожалуйста, укажите не менее 15 сообщений."
+                    await message_obj.reply_text("Минимальное количество сообщений для анализа: 15. Пожалуйста, укажите не менее 15 сообщений.")
+                    return Event.PARAMETERS_UNCLEAR
                 if message_count > 1000:
-                    return "Максимальное количество сообщений для анализа: 1000. Пожалуйста, укажите не более 1000 сообщений."
+                    await message_obj.reply_text("Максимальное количество сообщений для анализа: 1000. Пожалуйста, укажите не более 1000 сообщений.")
+                    return Event.PARAMETERS_UNCLEAR
                 params["message_count"] = message_count
             except (ValueError, TypeError):
-                return "Количество сообщений должно быть целым числом. Пожалуйста, укажите корректное количество (например, '300 сообщений')."
+                await message_obj.reply_text("Количество сообщений должно быть целым числом. Пожалуйста, укажите корректное количество (например, '300 сообщений').")
+                return Event.PARAMETERS_UNCLEAR
         
         if time_window_hours is not None:
             try:
                 time_window_hours = float(time_window_hours)
                 if time_window_hours < 0.5:
-                    return "Минимальный временной период для анализа: 30 минут. Пожалуйста, укажите период не менее 30 минут."
+                    await message_obj.reply_text("Минимальный временной период для анализа: 30 минут. Пожалуйста, укажите период не менее 30 минут.")
+                    return Event.PARAMETERS_UNCLEAR
                 if time_window_hours > 24:
-                    return "Максимальный временной период для анализа: 24 часа. Пожалуйста, укажите период не более 24 часов."
+                    await message_obj.reply_text("Максимальный временной период для анализа: 24 часа. Пожалуйста, укажите период не более 24 часов.")
+                    return Event.PARAMETERS_UNCLEAR
                 params["time_window_hours"] = time_window_hours
             except (ValueError, TypeError):
-                return "Временной период должен быть числом. Пожалуйста, укажите корректный период (например, 'за последний час' или 'за последние 3 часа')."
+                await message_obj.reply_text("Временной период должен быть числом. Пожалуйста, укажите корректный период (например, 'за последний час' или 'за последние 3 часа').")
+                return Event.PARAMETERS_UNCLEAR
         
         # Step 3: If still no parameters, ask user to provide explicitly
         if not message_count and not time_window_hours:
-            return (
+            await message_obj.reply_text(
                 "Прошу прощения, сэр/мадам. Для суммирования необходимо указать параметры.\n\n"
                 "Пожалуйста, укажите:\n"
                 "- Либо количество сообщений (например, 'последние 300 сообщений', минимум 15, максимум 1000)\n"
                 "- Либо временной период (например, 'за последний час', 'за последние 3 часа', минимум 30 минут, максимум 24 часа)"
             )
+            return Event.PARAMETERS_UNCLEAR
         
         # Step 4: Update local variables from validated params
         message_count = params.get("message_count")
@@ -169,10 +186,11 @@ class SummarizeCommand(BaseCommand):
             
             if not redis_messages:
                 if message_count:
-                    return f"Прошу прощения, сэр/мадам, но не найдено сообщений для анализа (запрошено: {message_count})."
+                    await message_obj.reply_text(f"Прошу прощения, сэр/мадам, но не найдено сообщений для анализа (запрошено: {message_count}).")
                 else:
                     hours_text = "часов" if time_window_hours >= 2 else "часа" if time_window_hours >= 1 else "минут"
-                    return f"Прошу прощения, сэр/мадам, но не найдено сообщений за последние {int(time_window_hours * 60) if time_window_hours < 1 else int(time_window_hours)} {hours_text}."
+                    await message_obj.reply_text(f"Прошу прощения, сэр/мадам, но не найдено сообщений за последние {int(time_window_hours * 60) if time_window_hours < 1 else int(time_window_hours)} {hours_text}.")
+                return Event.COMMAND_EXECUTED
             
             # Parse message IDs from Redis format: "{user_id}:{message_id}"
             message_data = []
@@ -189,7 +207,8 @@ class SummarizeCommand(BaseCommand):
                     continue
             
             if not message_data:
-                return "Прошу прощения, сэр/мадам, но не удалось обработать сообщения."
+                await message_obj.reply_text("Прошу прощения, сэр/мадам, но не удалось обработать сообщения.")
+                return Event.COMMAND_EXECUTED
             
             # Get full message content from MTProto
             mtproto = get_mtproto_client()
@@ -240,14 +259,16 @@ class SummarizeCommand(BaseCommand):
                     })
                 
                 if not messages_for_openai:
-                    return "Прошу прощения, сэр/мадам, но не удалось получить содержимое сообщений."
+                    await message_obj.reply_text("Прошу прощения, сэр/мадам, но не удалось получить содержимое сообщений.")
+                    return Event.COMMAND_EXECUTED
                 
                 # Summarize using OpenAI
-                summary_result = self.chatgpt.summarize_messages(messages_for_openai)
+                summary_result = chatgpt_client.summarize_messages(messages_for_openai)
                 topics = summary_result.get("topics", [])
                 
                 if not topics:
-                    return "Прошу прощения, сэр/мадам, но не удалось определить темы обсуждения."
+                    await message_obj.reply_text("Прошу прощения, сэр/мадам, но не удалось определить темы обсуждения.")
+                    return Event.COMMAND_EXECUTED
                 
                 # Cache topics in Redis
                 for topic in topics:
@@ -255,88 +276,27 @@ class SummarizeCommand(BaseCommand):
                     if topic_handle:
                         redis_client.cache_topic_summary(chat_id, topic_handle, topic)
                 
-                # Build response
-                if len(topics) == 1:
-                    # Single topic - show breakdown directly
-                    topic = topics[0]
-                    return self._format_single_topic_response(topic, chat_id, message_count, time_window_hours)
-                else:
-                    # Multiple topics - ask user to choose
-                    return self._format_multiple_topics_response(topics, chat_id, message_count, time_window_hours)
+                # Build response - always show topics list (no breakdown)
+                response = self._format_topics_list_response(topics, chat_id, message_count, time_window_hours)
+                await message_obj.reply_text(response, parse_mode="Markdown")
+                return Event.COMMAND_EXECUTED
                     
             finally:
                 await mtproto.stop()
                 
         except Exception as e:
             logger.error(f"Error in Summarize command: {e}")
-            return f"Прошу прощения, сэр/мадам, но произошла ошибка при выполнении команды: {str(e)}"
+            await message_obj.reply_text(f"Прошу прощения, сэр/мадам, но произошла ошибка при выполнении команды: {str(e)}")
+            return Event.COMMAND_EXECUTED
     
-    def _format_single_topic_response(
-        self, 
-        topic: dict, 
-        chat_id: int, 
-        message_count: Optional[int],
-        time_window_hours: Optional[float]
-    ) -> str:
-        """Format response for single topic."""
-        description = topic.get("description", topic.get("topic_handle", "Тема"))
-        message_count_topic = topic.get("message_count", 0)
-        summary = topic.get("summary", "")
-        start_message_id = topic.get("start_message", {}).get("message_id", 0)
-        
-        # Build time/message count text
-        if message_count:
-            time_text = f"последние {message_count} сообщений"
-        else:
-            hours = int(time_window_hours) if time_window_hours else 0
-            if hours == 1:
-                time_text = "последний час"
-            elif hours in [2, 3, 4]:
-                time_text = f"последние {hours} часа"
-            else:
-                time_text = f"последние {hours} часов"
-        
-        # Build message link
-        # Telegram links use channel ID without the -100 prefix for groups/channels
-        # For example: -1001234567890 becomes 1234567890 in the link
-        link_chat_id = str(abs(chat_id))
-        if len(link_chat_id) > 10 and link_chat_id.startswith("100"):
-            link_chat_id = link_chat_id[3:]  # Remove -100 prefix for groups/channels
-        message_link = f"https://t.me/c/{link_chat_id}/{start_message_id}" if start_message_id else ""
-        
-        response = f"Конечно, сэр/мадам. За {time_text} обсуждалась тема **{description}** ({message_count_topic} сообщений).\n\n"
-        
-        if message_link:
-            response += f"[Начало обсуждения]({message_link})\n\n"
-        
-        # Format summary points
-        if summary:
-            # Split summary by newlines or numbers
-            points = summary.split("\n")
-            formatted_points = []
-            for point in points:
-                point = point.strip()
-                if point:
-                    # Remove leading numbers if present
-                    if point and point[0].isdigit():
-                        point = point.split(".", 1)[-1].strip()
-                    if point:
-                        formatted_points.append(point)
-            
-            if formatted_points:
-                for i, point in enumerate(formatted_points, 1):
-                    response += f"{i}. {point}\n"
-        
-        return response
-    
-    def _format_multiple_topics_response(
+    def _format_topics_list_response(
         self, 
         topics: List[dict], 
         chat_id: int,
         message_count: Optional[int],
         time_window_hours: Optional[float]
     ) -> str:
-        """Format response for multiple topics - ask user to choose."""
+        """Format response showing list of topics (no breakdown)."""
         # Build time/message count text
         if message_count:
             time_text = f"последние {message_count} сообщений"
@@ -356,7 +316,7 @@ class SummarizeCommand(BaseCommand):
             message_count_topic = topic.get("message_count", 0)
             response += f"{i}. {description} ({message_count_topic} сообщений)\n"
         
-        response += "\nКакую тему вы хотите, чтобы я разобрал подробнее?"
+        response += "\nЕсли вы хотите разобрать какую-то тему подробнее, просто попросите меня об этом."
         
         return response
 

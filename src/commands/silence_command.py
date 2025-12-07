@@ -3,7 +3,8 @@ from .base import BaseCommand
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from silence_state import silence_state
+from tools.state_machine import Event
+from redis_client import redis_client
 
 
 class SilenceCommand(BaseCommand):
@@ -15,25 +16,46 @@ class SilenceCommand(BaseCommand):
             description="Перестать читать сообщения и отвечать на них (или возобновить работу)"
         )
     
-    async def execute(self, parameters: dict = None, bot=None, chat_id: int = None) -> str:
+    async def execute(self, parameters: dict = None, update=None, context=None, chatgpt_client=None) -> Event:
         """
-        Execute the silence command - toggle silence state.
+        Execute the silence command - toggle silence state using Redis.
         
         Args:
             parameters: Not used
-            bot: Telegram bot instance
-            chat_id: Chat ID to toggle silence for
+            update: Telegram Update object
+            context: Bot context
+            chatgpt_client: Not used
             
         Returns:
-            Response message
+            Event enum
         """
-        if not chat_id:
-            return "Прошу прощения, сэр/мадам, но не удалось определить чат."
+        message_obj = update.message if update.message else update.channel_post
+        if not message_obj:
+            return Event.COMMAND_EXECUTED
         
-        # Toggle silence state
-        is_now_silenced = silence_state.toggle_silence(chat_id)
+        chat_id = message_obj.chat.id
+        user_id = message_obj.from_user.id if message_obj.from_user else None
         
-        if is_now_silenced:
-            return "Как скажете, сэр/мадам. Я больше не буду хранить сообщения и отвечать на них. Если я снова понадоблюсь, просто позовите меня - и я к вашим услугам."
+        if not chat_id or not user_id:
+            await message_obj.reply_text("Прошу прощения, сэр/мадам, но не удалось определить чат или пользователя.")
+            return Event.COMMAND_EXECUTED
+        
+        # Check if bot is currently silenced
+        is_silenced = redis_client.is_bot_silenced(chat_id)
+        
+        if is_silenced:
+            # Check if this user is the one who silenced
+            silence_user_id = redis_client.get_silence_user_id(chat_id)
+            if silence_user_id == user_id:
+                # Unsilence
+                redis_client.unsilence_bot(chat_id)
+                await message_obj.reply_text("К вашим услугам, сэр/мадам. Я снова готов слушать и отвечать на ваши запросы.")
+            else:
+                # Different user trying to unsilence - ignore
+                await message_obj.reply_text("Прошу прощения, сэр/мадам, но только пользователь, который меня заглушил, может меня разбудить.")
         else:
-            return "К вашим услугам, сэр/мадам. Я снова готов слушать и отвечать на ваши запросы."
+            # Silence the bot
+            redis_client.set_bot_silenced(chat_id, user_id)
+            await message_obj.reply_text("Как скажете, сэр/мадам. Я больше не буду хранить сообщения и отвечать на них. Если я снова понадоблюсь, просто позовите меня - и я к вашим услугам.")
+        
+        return Event.COMMAND_EXECUTED

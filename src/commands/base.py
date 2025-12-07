@@ -1,6 +1,10 @@
 """Base command class for all bot commands."""
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.state_machine import Event
 
 
 class BaseCommand(ABC):
@@ -27,15 +31,24 @@ class BaseCommand(ABC):
         return True, None
     
     @abstractmethod
-    def execute(self, parameters: dict = None) -> str:
+    async def execute(
+        self, 
+        parameters: dict = None, 
+        update=None, 
+        context=None, 
+        chatgpt_client=None
+    ) -> Event:
         """
         Execute the command.
         
         Args:
             parameters: Dictionary of parameters for the command
+            update: Telegram Update object (for sending messages)
+            context: Bot context
+            chatgpt_client: ChatGPT client instance
             
         Returns:
-            Response message to send to user
+            Event enum indicating what happened
         """
         pass
     

@@ -6,12 +6,12 @@
     },
     {
         "from": "INIT",
-        "to": "PENDING_COMMAND_CLARFIFICATION",
+        "to": "PENDING_COMMAND_CLARIFICATION",
         "condition": "command_unclear"
     },
     {
         "from": "INIT",
-        "to": "PENDING_COMMAND_PARAMETERS",
+        "to": "PENDING_PARAMETERS_CLARIFICATION",
         "condition": "parameters_unclear"
     },
     {
@@ -20,32 +20,32 @@
         "condition": "ignore_user"
     },
     {
-        "from": "PENDING_COMMAND_CLARFIFICATION",
-        "to": "PENDING_COMMAND_CLARFIFICATION",
+        "from": "PENDING_COMMAND_CLARIFICATION",
+        "to": "PENDING_COMMAND_CLARIFICATION",
         "condition": "command_unclear"
     },
     {
-        "from": "PENDING_COMMAND_CLARFIFICATION",
-        "to": "PENDING_COMMAND_PARAMETERS",
+        "from": "PENDING_COMMAND_CLARIFICATION",
+        "to": "PENDING_PARAMETERS_CLARIFICATION",
         "condition": "parameters_unclear"
     },
     {
-        "from": "PENDING_COMMAND_CLARFIFICATION",
+        "from": "PENDING_COMMAND_CLARIFICATION",
         "to": "IGNORED",
         "condition": "ignore_user"
     },
     {
-        "from": "PENDING_COMMAND_CLARFIFICATION",
+        "from": "PENDING_COMMAND_CLARIFICATION",
         "to": "INIT",
         "condition": "command_executed"
     },
     {
-        "from": "PENDING_COMMAND_PARAMETERS",
-        "to": "PENDING_COMMAND_PARAMETERS",
+        "from": "PENDING_PARAMETERS_CLARIFICATION",
+        "to": "PENDING_PARAMETERS_CLARIFICATION",
         "condition": "parameters_unclear"
     },
     {
-        "from": "PENDING_COMMAND_PARAMETERS",
+        "from": "PENDING_PARAMETERS_CLARIFICATION",
         "to": "INIT",
         "condition": "command_executed"
     },

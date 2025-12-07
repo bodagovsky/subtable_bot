@@ -43,20 +43,31 @@ class MostActiveUserCommand(BaseCommand):
         
         return True, None
     
-    async def execute(self, parameters: dict = None, bot: Optional[Bot] = None, chat_id: Optional[int] = None) -> str:
+    async def execute(self, parameters: dict = None, update=None, context=None, chatgpt_client=None) -> Event:
         """
         Execute the command.
         
         Args:
             parameters: Dictionary containing 'time_window_hours' (in hours)
-            bot: Telegram bot instance for fetching messages
-            chat_id: Chat ID to fetch messages from
+            update: Telegram Update object
+            context: Bot context
+            chatgpt_client: Not used
             
         Returns:
-            Response message with top 3 users
+            Event enum
         """
+        from tools.state_machine import Event
+        
+        message_obj = update.message if update.message else update.channel_post
+        if not message_obj:
+            return Event.COMMAND_EXECUTED
+        
+        bot = context.bot if context else None
+        chat_id = message_obj.chat.id
+        
         if not bot or not chat_id:
-            return "Прошу прощения, сэр/мадам, но контекст бота недоступен для этой команды."
+            await message_obj.reply_text("Прошу прощения, сэр/мадам, но контекст бота недоступен для этой команды.")
+            return Event.COMMAND_EXECUTED
         
         params = parameters or {}
         time_window_hours = params.get("time_window_hours")
@@ -65,7 +76,8 @@ class MostActiveUserCommand(BaseCommand):
         try:
             time_window_hours = float(time_window_hours)
         except (ValueError, TypeError):
-            return "Прошу прощения, сэр/мадам, но формат временного периода неверен."
+            await message_obj.reply_text("Прошу прощения, сэр/мадам, но формат временного периода неверен.")
+            return Event.PARAMETERS_UNCLEAR
         
         try:
             # Get user counts from message storage
@@ -75,7 +87,8 @@ class MostActiveUserCommand(BaseCommand):
                 hours_text = "часов" if time_window_hours != 1 else "час"
                 if time_window_hours in [2, 3, 4]:
                     hours_text = "часа"
-                return f"Прошу прощения, сэр/мадам, но сообщений не найдено за последние {int(time_window_hours)} {hours_text}."
+                await message_obj.reply_text(f"Прошу прощения, сэр/мадам, но сообщений не найдено за последние {int(time_window_hours)} {hours_text}.")
+                return Event.COMMAND_EXECUTED
             
             # Get top 3 users
             top_users = Counter(user_counts).most_common(3)
@@ -89,7 +102,6 @@ class MostActiveUserCommand(BaseCommand):
             for i, (user_id, count) in enumerate(top_users, 1):
                 try:
                     # Get user info using bot API
-                    # Note: This is a synchronous call in python-telegram-bot
                     chat_member = await bot.get_chat_member(chat_id, user_id)
                     user = chat_member.user
                     user_name = user.first_name or "Неизвестно"
@@ -105,9 +117,11 @@ class MostActiveUserCommand(BaseCommand):
                     messages_text = "сообщений" if count % 10 in [0, 5, 6, 7, 8, 9] or count % 100 in [11, 12, 13, 14] else "сообщения" if count % 10 in [2, 3, 4] else "сообщение"
                     response += f"{i}. Пользователь {user_id}: {count} {messages_text}\n"
             
-            return response
+            await message_obj.reply_text(response, parse_mode="Markdown")
+            return Event.COMMAND_EXECUTED
             
         except Exception as e:
             logger.error(f"Error in MostActiveUser command: {e}")
-            return f"Прошу прощения, сэр/мадам, но произошла ошибка при выполнении команды: {str(e)}"
+            await message_obj.reply_text(f"Прошу прощения, сэр/мадам, но произошла ошибка при выполнении команды: {str(e)}")
+            return Event.COMMAND_EXECUTED
 

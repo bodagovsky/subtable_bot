@@ -321,6 +321,83 @@ class RedisClient:
         except Exception as e:
             logger.error(f"Error getting keys from Redis: {e}")
             return set()
+    
+    def set_bot_silenced(self, channel_id: int, user_id: int) -> bool:
+        """
+        Set bot as silenced for a channel. Only the user who silenced can unsilence.
+        
+        Args:
+            channel_id: Channel/chat ID
+            user_id: User ID who silenced the bot
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            key = f"bot:silenced:{channel_id}"
+            # Store user_id who silenced the bot, with 1 hour TTL
+            self.client.setex(key, 3600, str(user_id))  # 3600 seconds = 1 hour
+            logger.info(f"Bot silenced in channel {channel_id} by user {user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting bot silenced: {e}")
+            return False
+    
+    def is_bot_silenced(self, channel_id: int) -> bool:
+        """
+        Check if bot is silenced for a channel.
+        
+        Args:
+            channel_id: Channel/chat ID
+            
+        Returns:
+            True if silenced, False otherwise
+        """
+        try:
+            key = f"bot:silenced:{channel_id}"
+            return self.client.exists(key) > 0
+        except Exception as e:
+            logger.error(f"Error checking bot silenced: {e}")
+            return False
+    
+    def get_silence_user_id(self, channel_id: int) -> Optional[int]:
+        """
+        Get the user ID who silenced the bot for a channel.
+        
+        Args:
+            channel_id: Channel/chat ID
+            
+        Returns:
+            User ID if silenced, None otherwise
+        """
+        try:
+            key = f"bot:silenced:{channel_id}"
+            user_id_str = self.client.get(key)
+            if user_id_str:
+                return int(user_id_str)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting silence user ID: {e}")
+            return None
+    
+    def unsilence_bot(self, channel_id: int) -> bool:
+        """
+        Unsilence the bot for a channel.
+        
+        Args:
+            channel_id: Channel/chat ID
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            key = f"bot:silenced:{channel_id}"
+            result = self.client.delete(key)
+            logger.info(f"Bot unsilenced in channel {channel_id}")
+            return result > 0
+        except Exception as e:
+            logger.error(f"Error unsilencing bot: {e}")
+            return False
 
 
 # Global Redis client instance
