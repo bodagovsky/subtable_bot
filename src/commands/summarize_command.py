@@ -1,7 +1,6 @@
 """Summarize command implementation."""
 from .base import BaseCommand
-from typing import Optional, List, Dict
-from telegram import Bot
+from typing import Optional, List
 import logging
 import sys
 import os
@@ -13,7 +12,6 @@ from tools.state_machine import Event
 from redis_client import redis_client
 from mtproto_client import get_mtproto_client
 from chatgpt_client import ChatGPTClient
-from config import COMMAND_PROBABILITY_HIGH_THRESHOLD, COMMAND_PROBABILITY_LOW_THRESHOLD
 
 utc = pytz.UTC
 logger = logging.getLogger(__name__)
@@ -234,6 +232,38 @@ class SummarizeCommand(BaseCommand):
                 messages_for_openai = []
                 message_dict = {msg["message_id"]: msg for msg in message_data}
                 
+                # Collect all unique user IDs
+                unique_user_ids = set()
+                for msg_data in message_data:
+                    user_id = msg_data.get("user_id")
+                    if user_id:
+                        unique_user_ids.add(user_id)
+                
+                # Fetch user names for all unique user IDs
+                user_id_to_name = {}
+                bot = context.bot if context else None
+                
+                if bot:
+                    for user_id in unique_user_ids:
+                        try:
+                            chat_member = await bot.get_chat_member(chat_id, user_id)
+                            user = chat_member.user
+                            user_name = user.first_name or ""
+                            if user.last_name:
+                                user_name += f" {user.last_name}" if user_name else user.last_name
+                            if user.username:
+                                user_name += f" (@{user.username})" if user_name else f"@{user.username}"
+                            if not user_name:
+                                user_name = f"User {user_id}"
+                            user_id_to_name[user_id] = user_name
+                        except Exception as e:
+                            logger.warning(f"Could not get user info for {user_id}: {e}")
+                            user_id_to_name[user_id] = f"User {user_id}"
+                else:
+                    # Fallback if bot is not available
+                    for user_id in unique_user_ids:
+                        user_id_to_name[user_id] = f"User {user_id}"
+                
                 for i, tg_msg in enumerate(telegram_messages):
                     if tg_msg is None:
                         continue
@@ -251,8 +281,11 @@ class SummarizeCommand(BaseCommand):
                     if not text:
                         continue
                     
+                    user_id = msg_data.get("user_id", 0)
+                    user_name = user_id_to_name.get(user_id, f"User {user_id}")
+                    
                     messages_for_openai.append({
-                        "user_id": msg_data.get("user_id", 0),
+                        "user_id": user_name,  # Use user name instead of user_id
                         "message_id": msg_id,
                         "text": text,
                         "timestamp": msg_data.get("timestamp", 0)
