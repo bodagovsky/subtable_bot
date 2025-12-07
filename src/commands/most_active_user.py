@@ -8,6 +8,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from message_storage import message_storage
+from tools.state_machine import Event
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,6 @@ class MostActiveUserCommand(BaseCommand):
         Returns:
             Event enum
         """
-        from tools.state_machine import Event
         
         message_obj = update.message if update.message else update.channel_post
         if not message_obj:

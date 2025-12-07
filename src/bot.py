@@ -21,7 +21,7 @@ from user_ignore_list import user_ignore_list
 from redis_client import redis_client
 from datetime import datetime
 
-from src.tools.state_machine import state_machine
+from tools.state_machine import state_machine
 
 
 # Enable logging
