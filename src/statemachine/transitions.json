@@ -1,0 +1,57 @@
+[
+    {
+        "from": "INIT",
+        "to": "INIT",
+        "condition": "command_executed"
+    },
+    {
+        "from": "INIT",
+        "to": "PENDING_COMMAND_CLARFIFICATION",
+        "condition": "command_unclear"
+    },
+    {
+        "from": "INIT",
+        "to": "PENDING_COMMAND_PARAMETERS",
+        "condition": "parameters_unclear"
+    },
+    {
+        "from": "INIT",
+        "to": "IGNORED",
+        "condition": "ignore_user"
+    },
+    {
+        "from": "PENDING_COMMAND_CLARFIFICATION",
+        "to": "PENDING_COMMAND_CLARFIFICATION",
+        "condition": "command_unclear"
+    },
+    {
+        "from": "PENDING_COMMAND_CLARFIFICATION",
+        "to": "PENDING_COMMAND_PARAMETERS",
+        "condition": "parameters_unclear"
+    },
+    {
+        "from": "PENDING_COMMAND_CLARFIFICATION",
+        "to": "IGNORED",
+        "condition": "ignore_user"
+    },
+    {
+        "from": "PENDING_COMMAND_CLARFIFICATION",
+        "to": "INIT",
+        "condition": "command_executed"
+    },
+    {
+        "from": "PENDING_COMMAND_PARAMETERS",
+        "to": "PENDING_COMMAND_PARAMETERS",
+        "condition": "parameters_unclear"
+    },
+    {
+        "from": "PENDING_COMMAND_PARAMETERS",
+        "to": "INIT",
+        "condition": "command_executed"
+    },
+    {
+        "from": "IGNORED",
+        "to": "INIT",
+        "condition": "stop_ignoring"
+    }
+]
