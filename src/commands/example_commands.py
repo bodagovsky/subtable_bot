@@ -2,6 +2,10 @@
 from .base import BaseCommand
 from datetime import datetime
 import random
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tools.state_machine import Event
 
 
 class TimeCommand(BaseCommand):
@@ -13,9 +17,13 @@ class TimeCommand(BaseCommand):
             description="Получить текущую дату и время"
         )
     
-    async def execute(self, parameters: dict = None) -> str:
+    async def execute(self, parameters: dict = None, update=None, context=None, chatgpt_client=None) -> Event:
         now = datetime.now()
-        return f"К вашим услугам, сэр/мадам. Текущее время: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+        message = f"К вашим услугам, сэр/мадам. Текущее время: {now.strftime('%Y-%m-%d %H:%M:%S')}"
+        message_obj = update.message if update.message else update.channel_post
+        if message_obj:
+            await message_obj.reply_text(message)
+        return Event.COMMAND_EXECUTED
 
 
 class RandomNumberCommand(BaseCommand):
@@ -52,12 +60,16 @@ class RandomNumberCommand(BaseCommand):
         
         return True, None
     
-    async def execute(self, parameters: dict = None) -> str:
+    async def execute(self, parameters: dict = None, update=None, context=None, chatgpt_client=None) -> Event:
         params = parameters or {}
         min_val = int(params.get("min", 1))
         max_val = int(params.get("max", 100))
         number = random.randint(min_val, max_val)
-        return f"Как вам будет угодно, сэр/мадам. Случайное число: {number}"
+        message = f"Как вам будет угодно, сэр/мадам. Случайное число: {number}"
+        message_obj = update.message if update.message else update.channel_post
+        if message_obj:
+            await message_obj.reply_text(message)
+        return Event.COMMAND_EXECUTED
 
 
 class EchoCommand(BaseCommand):
@@ -69,8 +81,12 @@ class EchoCommand(BaseCommand):
             description="Повторить сообщение или текст"
         )
     
-    async def execute(self, parameters: dict = None) -> str:
+    async def execute(self, parameters: dict = None, update=None, context=None, chatgpt_client=None) -> Event:
         params = parameters or {}
-        message = params.get("message", "Сообщение не предоставлено")
-        return f"Конечно, сэр/мадам. Эхо: {message}"
+        echo_message = params.get("message", "Сообщение не предоставлено")
+        message = f"Конечно, сэр/мадам. Эхо: {echo_message}"
+        message_obj = update.message if update.message else update.channel_post
+        if message_obj:
+            await message_obj.reply_text(message)
+        return Event.COMMAND_EXECUTED
 

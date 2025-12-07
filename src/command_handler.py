@@ -62,48 +62,53 @@ class CommandHandler:
         command = self.commands[command_name]
         return command.validate_parameters(parameters)
     
-    async def execute_command(self, command_name: str, parameters: dict = None, bot=None, chat_id: int = None, user_id: int = None, user_message: str = None) -> str:
+    async def execute_command(
+        self, 
+        command_name: str, 
+        parameters: dict = None, 
+        update=None,
+        context=None,
+        chatgpt_client=None
+    ):
         """
         Execute a command by name.
         
         Args:
             command_name: Name of the command to execute
             parameters: Parameters for the command
-            bot: Optional bot instance (for commands that need it)
-            chat_id: Optional chat ID (for commands that need it)
-            user_id: Optional user ID (for commands that need it)
-            user_message: Optional original user message (for parameter extraction)
+            update: Telegram Update object
+            context: Bot context
+            chatgpt_client: ChatGPT client instance
             
         Returns:
-            Response message
+            Event enum indicating what happened
         """
+        import sys
+        import os
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from tools.state_machine import Event
+        
         if command_name not in self.commands:
-            return f"Прошу прощения, сэр/мадам, но команда '{command_name}' не найдена."
+            message_obj = update.message if update.message else update.channel_post
+            if message_obj:
+                await message_obj.reply_text(f"Прошу прощения, сэр/мадам, но команда '{command_name}' не найдена.")
+            return Event.COMMAND_UNCLEAR
         
         # Validate parameters before execution (safety check)
         is_valid, error_message = self.validate_command(command_name, parameters)
         if not is_valid:
-            return f"Прошу прощения, сэр/мадам. {error_message}"
+            message_obj = update.message if update.message else update.channel_post
+            if message_obj:
+                await message_obj.reply_text(f"Прошу прощения, сэр/мадам. {error_message}")
+            return Event.PARAMETERS_UNCLEAR
         
         try:
             command = self.commands[command_name]
-            # Check if command needs bot/chat_id/user_id/user_message (has execute signature with these params)
-            import inspect
-            sig = inspect.signature(command.execute)
-            params_to_pass = {}
-            if 'bot' in sig.parameters:
-                params_to_pass['bot'] = bot
-            if 'chat_id' in sig.parameters:
-                params_to_pass['chat_id'] = chat_id
-            if 'user_id' in sig.parameters:
-                params_to_pass['user_id'] = user_id
-            if 'user_message' in sig.parameters:
-                params_to_pass['user_message'] = user_message
-            
-            if params_to_pass:
-                return await command.execute(parameters, **params_to_pass)
-            else:
-                return await command.execute(parameters)
+            # All commands now use the same signature: execute(parameters, update, context, chatgpt_client)
+            return await command.execute(parameters, update, context, chatgpt_client)
         except Exception as e:
-            return f"Прошу прощения, сэр/мадам, но произошла ошибка при выполнении команды: {str(e)}"
+            message_obj = update.message if update.message else update.channel_post
+            if message_obj:
+                await message_obj.reply_text(f"Прошу прощения, сэр/мадам, но произошла ошибка при выполнении команды: {str(e)}")
+            return Event.COMMAND_EXECUTED
 
