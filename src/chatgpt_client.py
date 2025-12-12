@@ -69,7 +69,7 @@ class ChatGPTClient:
             report = result.get("report", "")
             return report
         except Exception as e:
-            print(e)
+            logger.error(e)
             return ""
     
     def analyze_message(self, user_message: str, available_commands: list) -> dict:
