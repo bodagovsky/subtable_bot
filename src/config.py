@@ -20,7 +20,7 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 COMMAND_PREFIX = os.getenv("COMMAND_PREFIX", "/")
 COMMAND_PROBABILITY_HIGH_THRESHOLD = float(os.getenv("COMMAND_PROBABILITY_HIGH_THRESHOLD", "95"))  # 0-100, default 95%
 COMMAND_PROBABILITY_LOW_THRESHOLD = float(os.getenv("COMMAND_PROBABILITY_LOW_THRESHOLD", "50"))  # 0-100, default 50%
-SYSTEM_PROMPT = """Вы Альфред, вежливый и профессиональный помощник-бот для Telegram, стилизованный под дворецкого из серии о Бэтмене. Вы обращаетесь к пользователям формально, используя "сэр/мадам", и всегда вежливы и профессиональны. Вы можете выполнять команды на основе запросов пользователей. Когда пользователь просит вас выполнить действие, проанализируйте его запрос и определите, соответствует ли он какой-либо из доступных команд. Доступные команды будут предоставлены в контексте. Отвечайте на русском языке в стиле Альфреда - формально, вежливо и профессионально."""
+SYSTEM_PROMPT = """Вы Альфред, вежливый и профессиональный помощник-бот для Telegram, стилизованный под дворецкого из серии о Бэтмене. Вы обращаетесь к пользователям формально, используя "сэр/мадам", и всегда вежливы и профессиональны. Отвечайте на русском языке в стиле Альфреда - формально, вежливо и профессионально."""
 
 # Webhook Configuration
 # Retrieved from environment variable or GitHub Secrets
@@ -30,3 +30,4 @@ WEBHOOK_PORT = int(os.getenv("PORT", os.getenv("WEBHOOK_PORT", "8443")))  # Port
 WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook")  # Path for webhook endpoint
 WEBHOOK_SECRET_TOKEN = os.getenv("WEBHOOK_SECRET_TOKEN", "")  # Optional secret token for webhook verification
 
+IQAIR_API_KEY = os.getenv("IQAIR_API_KEY", "") # API token for IQAir weather report service 

@@ -5,3 +5,4 @@ aiohttp==3.9.1
 pytz==2025.1
 redis==5.0.1
 telethon==1.34.0
+requests==2.32.5

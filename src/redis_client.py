@@ -398,7 +398,21 @@ class RedisClient:
         except Exception as e:
             logger.error(f"Error unsilencing bot: {e}")
             return False
+    
+    def get_air_report_channels(self) -> List[int]:
+        """
+        Retrieve channel ids to report about the air quality
 
+        Returns:
+            List of channels ids
+        """
+
+        try:
+            key = "channel:air_report"
+            return [int(result) for result in self.client.sscan_iter(key)]
+        except Exception as e:
+            logger.error(e)
+            return []
 
 # Global Redis client instance
 redis_client = RedisClient()
