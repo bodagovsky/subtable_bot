@@ -59,6 +59,23 @@ class MTProtoClient:
             logger.info("MTProto client stopped")
         except Exception as e:
             logger.error(f"Error stopping MTProto client: {e}")
+
+    async def send_message(self, to: int, message: str):
+        """
+        Send message ton the entity provided in the parameters
+
+        Args:
+            to: Chat/channel ID (can be negative for groups/channels)
+        """
+        try:
+            entity = await self.client.get_entity(PeerChannel(to))
+        except Exception:
+            entity = await self.client.get_entity(PeerUser(to))
+
+        sent_message = await self.client.send_message(entity, message)
+        if sent_message:
+            logger.info(sent_message.message)
+
     
     async def get_messages(
         self, 

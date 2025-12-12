@@ -34,6 +34,7 @@ jobs:
           TELEGRAM_API_HASH="${{ secrets.TELEGRAM_API_HASH }}" \
           TELEGRAM_API_ID="${{ secrets.TELEGRAM_API_ID }}" \
           TELEGRAM_BOT_TOKEN="${{ secrets.TELEGRAM_BOT_TOKEN }}" \
+          IQAIR_API_KEY="${{ secrets.IQAIR_API_KEY }}" \
           --app "${{ vars.HEROKU_APP_NAME }}"
       env:
         HEROKU_API_KEY: "${{ secrets.HEROKU_API_KEY }}"

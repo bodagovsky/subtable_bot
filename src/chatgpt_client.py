@@ -1,4 +1,5 @@
 """ChatGPT/OpenAI API client for natural language processing."""
+import json
 import logging
 from openai import OpenAI
 from config import OPENAI_API_KEY, OPENAI_MODEL, SYSTEM_PROMPT
@@ -15,6 +16,61 @@ class ChatGPTClient:
         self.client = OpenAI(api_key=OPENAI_API_KEY)
         self.model = OPENAI_MODEL
         self.system_prompt = SYSTEM_PROMPT
+
+    def prepare_weather_report(self, raw_report: dict) -> str:
+        """
+        Analyze response from the API and prepare concise and polite report about air pollution and weather
+
+        Args: 
+            raw_report: The report returned from the weather API service
+        
+        Returns:
+            formatted message with weather report and air pollution data
+        """
+
+        data = json.dumps(raw_report)
+        prompt = f"""Проанализируй следующий ответ от сервиса IQAir в формате json
+        и составь отчет о качестве воздуха и прогнозе погоды
+        Строку "Тип осадков" включай только в том числе если вероятность средняя или высокая
+
+        Ты можешь менять эмодзи в зависимости от актуальной информации (например, эмодзи яркого солнца если погода солнечная)
+        Так же ты можешь отформатировать сообщение так чтобы оно выглядело приятно в качестве сообщения в Телеграме
+        Игнорируй данные о погоде, их добавлять в отчет не нужно
+
+        Вот пример, по которому тебе необходимо приготовить отчет:
+
+        🟡 Качество воздуха: Среднее (AQI 91)
+        • Безопасно для большинства людей  
+        • Чувствительным группам — снизить нагрузки при дискомфорте  
+
+        Рекомендации:
+        • Можно гулять без ограничений  
+        • Маска не требуется (P2/P3 — при ухудшении воздуха)
+
+        Данные API запроса:
+        {data}
+
+        Отвечай в формате JSON:
+        {{
+            "report": "report"
+        }}
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.3
+            )
+            result = json.loads(response.choices[0].message.content)
+            report = result.get("report", "")
+            return report
+        except Exception as e:
+            print(e)
+            return ""
     
     def analyze_message(self, user_message: str, available_commands: list) -> dict:
         """
