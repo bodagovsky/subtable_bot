@@ -585,9 +585,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if silence_cmd and silence_cmd.get("probability", 0) >= COMMAND_PROBABILITY_HIGH_THRESHOLD:
                 if silence_user_id == user_id:
                     # User who silenced is trying to unsilence - execute command
-                    parameters = silence_cmd.get("parameters", {})
                     event = await command_handler.execute_command(
-                        "silence", parameters, update=update, context=context, chatgpt_client=chatgpt
+                        "silence", {}, update=update, context=context, chatgpt_client=chatgpt
                     )
                     # Update state based on event
                     current_state = context.user_data.get("user_state", UserState.INIT)
@@ -624,9 +623,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             silence_me_prob = silence_me_cmd.get("probability", 0) if silence_me_cmd else 0
             if silence_me_prob >= COMMAND_PROBABILITY_HIGH_THRESHOLD:
                 # Execute silence_me to unsilence
-                parameters = silence_me_cmd.get("parameters", {})
+                
                 event = await command_handler.execute_command(
-                    "silence_me", parameters, update=update, context=context, chatgpt_client=chatgpt
+                    "silence_me", {}, update=update, context=context, chatgpt_client=chatgpt
                 )
                 # Update state based on event
                 current_state = context.user_data.get("user_state", UserState.INIT)
@@ -640,7 +639,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Step 3: Check if message should be processed (mention or reply)
     should_process, user_message = should_process_message(update, context)
-    if not should_process or not user_message:
+    if not should_process:
         # Store message for tracking if not silenced
         if message_obj.from_user:
             try:
@@ -664,16 +663,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_command = context.user_data.get("current_command")
     
     # Step 5: Analyze message to get command probabilities
-    available_commands = command_handler.get_available_commands()
-    analysis = chatgpt.analyze_message(user_message, available_commands)
-    commands_with_probs = analysis.get("commands", [])
+    # available_commands = command_handler.get_available_commands()
+    # analysis = chatgpt.analyze_message(user_message, available_commands)
+    # commands_with_probs = analysis.get("commands", [])
     
-    logger.info(f"ChatGPT analysis: {analysis}")
-    logger.info(f"Current user state: {current_state}, current command: {current_command}")
+    # logger.info(f"ChatGPT analysis: {analysis}")
+    # logger.info(f"Current user state: {current_state}, current command: {current_command}")
     
     # Step 6: Handle based on current state
     if current_state == UserState.PENDING_COMMAND_CLARIFICATION:
-        # User is clarifying the command - retry extraction
+        # Perform commands extraction
+        available_commands = command_handler.get_available_commands()
+        analysis = chatgpt.analyze_message(user_message, available_commands)
+        commands_with_probs = analysis.get("commands", [])
+
         high_threshold_commands = [
             cmd for cmd in commands_with_probs
             if cmd.get("probability", 0) >= COMMAND_PROBABILITY_HIGH_THRESHOLD
@@ -683,7 +686,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Command clarified - execute it
             cmd_data = high_threshold_commands[0]
             command_name = cmd_data.get("name")
-            parameters = cmd_data.get("parameters", {})
+            
+            # Check if command requires parameters and extract them separately
+            parameters = {}
+            command = command_handler.commands.get(command_name)
+            if command and command.requires_parameters():
+                # Extract parameters separately using ChatGPT
+                parameters_description = command.human_readable_parameters()
+                extraction_result = chatgpt.extract_parameters_for_command(
+                    command_name, user_message, parameters_description
+                )
+                if extraction_result.get("success"):
+                    parameters = extraction_result.get("parameters", {})
+                else:
+                    # Parameters extraction failed - will be handled by command execution
+                    parameters = {}
             
             event = await command_handler.execute_command(
                 command_name, parameters, update=update, context=context, chatgpt_client=chatgpt
@@ -709,17 +726,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["user_state"] = new_state
     
     elif current_state == UserState.PENDING_PARAMETERS_CLARIFICATION:
-        # User is clarifying parameters - retry with current command
+        # User is clarifying parameters - extract parameters for current command
         if current_command:
-            # Re-analyze to get updated parameters
-            cmd_data = None
-            for cmd in commands_with_probs:
-                if cmd.get("name") == current_command:
-                    cmd_data = cmd
-                    break
-            
-            if cmd_data:
-                parameters = cmd_data.get("parameters", {})
+            # Get the command and extract parameters from user message
+            command = command_handler.commands.get(current_command)
+            if command:
+                parameters = {}
+                if command.requires_parameters():
+                    # Extract parameters separately using ChatGPT
+                    parameters_description = command.human_readable_parameters()
+                    extraction_result = chatgpt.extract_parameters_for_command(
+                        current_command, user_message, parameters_description
+                    )
+                    if extraction_result.get("success"):
+                        parameters = extraction_result.get("parameters", {})
+                    # If extraction failed, parameters will be empty and command will handle it
+                
                 event = await command_handler.execute_command(
                     current_command, parameters, update=update, context=context, chatgpt_client=chatgpt
                 )
@@ -730,7 +752,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if event == Event.COMMAND_EXECUTED:
                     context.user_data["current_command"] = None
             else:
-                # Command not found in analysis - treat as parameter clarification failure
+                # Command not found - this shouldn't happen, but treat as parameter clarification failure
                 event = Event.PARAMETERS_UNCLEAR
                 new_state = state_machine.perform_transition(current_state, event) or current_state
                 context.user_data["user_state"] = new_state
@@ -739,7 +761,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data["user_state"] = UserState.INIT
     
     else:  # INIT or other states
-        # New request - analyze and execute
+        # New request - analyze commands first
+        available_commands = command_handler.get_available_commands()
+        analysis = chatgpt.analyze_message(user_message, available_commands)
+        commands_with_probs = analysis.get("commands", [])
+        
         high_threshold_commands = [
             cmd for cmd in commands_with_probs
             if cmd.get("probability", 0) >= COMMAND_PROBABILITY_HIGH_THRESHOLD
@@ -757,7 +783,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Single high probability command - execute directly
             cmd_data = high_threshold_commands[0]
             command_name = cmd_data.get("name")
-            parameters = cmd_data.get("parameters", {})
+            
+            # Check if command requires parameters and extract them separately
+            parameters = {}
+            command = command_handler.commands.get(command_name)
+            if command and command.requires_parameters():
+                # Extract parameters separately using ChatGPT
+                parameters_description = command.human_readable_parameters()
+                extraction_result = chatgpt.extract_parameters_for_command(
+                    command_name, user_message, parameters_description
+                )
+                if extraction_result.get("success"):
+                    parameters = extraction_result.get("parameters", {})
+                # If extraction failed, parameters will be empty and command will handle it
             
             event = await command_handler.execute_command(
                 command_name, parameters, update=update, context=context, chatgpt_client=chatgpt
@@ -785,7 +823,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await message_obj.reply_text(
                 f"Понял вас, сэр/мадам. Я определил несколько команд, которые могут соответствовать вашему запросу:\n\n"
                 f"{cmd_list}\n\n"
-                f"Будьте так любезны, укажите номер команды или уточните ваш запрос."
+                f"Будьте так любезны, уточните и повторите ваш запрос."
             )
         
         elif len(low_threshold_commands) > 0:
@@ -802,7 +840,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await message_obj.reply_text(
                 f"Понял вас, сэр/мадам. Я определил несколько возможных команд, которые могут соответствовать вашему запросу:\n\n"
                 f"{cmd_list}\n\n"
-                f"Будьте так любезны, укажите номер команды, которую вы желаете выполнить, или уточните ваш запрос."
+                f"Будьте так любезны, уточните и повторите ваш запрос."
             )
         
         else:

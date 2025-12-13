@@ -35,7 +35,7 @@ class ChatGPTClient:
 
         Ты можешь менять эмодзи в зависимости от актуальной информации (например, эмодзи яркого солнца если погода солнечная)
         Так же ты можешь отформатировать сообщение так чтобы оно выглядело приятно в качестве сообщения в Телеграме
-        Игнорируй данные о погоде, их добавлять в отчет не нужно
+        Подгоняй рекомендации под актуальные данные
 
         Вот пример, по которому тебе необходимо приготовить отчет:
 
@@ -97,14 +97,13 @@ class ChatGPTClient:
 
 Для каждой команды укажите:
 - Вероятность (0-100), что пользователь хочет выполнить эту команду
-- Параметры, если они нужны
 - Краткое обоснование
 
 ВАЖНО: Вероятность должна отражать уверенность в том, что пользователь хочет выполнить именно эту команду.
 - 0-30%: Маловероятно, что пользователь хочет эту команду
 - 31-60%: Возможно, пользователь хочет эту команду
-- 61-94%: Вероятно, пользователь хочет эту команду
-- 95-100%: Очень вероятно, что пользователь хочет эту команду
+- 61-93%: Вероятно, пользователь хочет эту команду
+- 94-100%: Очень вероятно, что пользователь хочет эту команду
 
 Отвечайте в формате JSON:
 {{
@@ -112,7 +111,6 @@ class ChatGPTClient:
         {{
             "name": "command_name",
             "probability": <число от 0 до 100>,
-            "parameters": {{"param1": "value1"}},
             "reasoning": "краткое обоснование"
         }},
         ...
@@ -146,7 +144,6 @@ class ChatGPTClient:
                     commands_with_probs.append({
                         "name": cmd_info["name"],
                         "probability": 0,
-                        "parameters": {},
                         "reasoning": "Команда не соответствует запросу"
                     })
             
@@ -160,7 +157,6 @@ class ChatGPTClient:
                     {
                         "name": cmd["name"],
                         "probability": 0,
-                        "parameters": {},
                         "reasoning": f"Ошибка анализа: {str(e)}"
                     }
                     for cmd in available_commands
@@ -495,17 +491,31 @@ class ChatGPTClient:
                 "reasoning": f"Ошибка при извлечении параметров: {str(e)}"
             }
     
-    def extract_topic_query(self, user_message: str) -> dict:
+    def extract_topic_query(self, user_message: str, known_topics: list[dict] = None) -> dict:
         """
         Extract topic query from user message for breakdown_topic command.
         
         Args:
             user_message: The user's message containing topic information
+            known_topics: Optional list of known topics from storage to help match
             
         Returns:
             dict with 'topic_query' (str or None) and 'success' (bool)
         """
-        prompt = f"""Извлеките название темы обсуждения из этого сообщения пользователя: "{user_message}"
+        topics_context = ""
+        if known_topics:
+            topics_text = "\n".join([
+                f"- {topic.get('description', topic.get('topic_handle', ''))}"
+                for topic in known_topics
+            ])
+            topics_context = f"""
+
+Доступные темы обсуждения в чате:
+{topics_text}
+
+Учтите эти темы при извлечении - пользователь может ссылаться на одну из них."""
+
+        prompt = f"""Извлеките название темы обсуждения из этого сообщения пользователя: "{user_message}"{topics_context}
 
 Пользователь хочет разобрать конкретную тему обсуждения. Извлеките название темы из сообщения.
 
@@ -557,7 +567,6 @@ class ChatGPTClient:
             
             # Validate the result
             topic_query = result.get("topic_query")
-            success = result.get("success", False)
             
             # Additional validation
             if topic_query:
@@ -768,5 +777,70 @@ class ChatGPTClient:
                     {**topic, "probability": 0, "reasoning": f"Ошибка анализа: {str(e)}"}
                     for topic in topics
                 ]
+            }
+    
+    def extract_parameters_for_command(
+        self, 
+        command_name: str, 
+        user_message: str, 
+        parameters_description: str
+    ) -> dict:
+        """
+        Extract parameters for a specific command from user message.
+        
+        Args:
+            command_name: Name of the command
+            user_message: The user's message containing parameter information
+            parameters_description: Human-readable description of required parameters
+            
+        Returns:
+            Dictionary with extracted parameters and 'success' (bool) flag
+        """
+        prompt = f"""Извлеките параметры для команды "{command_name}" из этого сообщения пользователя: "{user_message}"
+
+Описание параметров, которые необходимо извлечь:
+{parameters_description}
+
+ВАЖНО:
+- Извлеките все параметры, указанные в описании
+- Если параметр не найден в сообщении, верните null для него
+- Верните success: true только если удалось извлечь хотя бы один обязательный параметр
+- Если не удалось извлечь ни один параметр, верните success: false
+
+Отвечайте в формате JSON:
+{{
+    "parameters": {{
+        <параметры в формате ключ-значение>
+    }},
+    "success": <true или false>,
+    "reasoning": "краткое объяснение того, что было извлечено или почему не удалось"
+}}"""
+        
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.3
+            )
+            
+            import json
+            result = json.loads(response.choices[0].message.content)
+            
+            # Ensure parameters dict exists
+            if "parameters" not in result:
+                result["parameters"] = {}
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error extracting parameters for command {command_name}: {e}")
+            return {
+                "parameters": {},
+                "success": False,
+                "reasoning": f"Ошибка при извлечении параметров: {str(e)}"
             }
 

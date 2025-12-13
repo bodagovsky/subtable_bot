@@ -42,7 +42,15 @@ class CommandHandler:
     def get_available_commands(self) -> List[dict]:
         """Get list of available commands with descriptions."""
         return [cmd.get_info() for cmd in self.commands.values()]
-    
+
+    def extract_parameters_for_command(self, command_name: str) -> str:
+        """Extract human readable parameters for command so that ChatGPT could extract ones from the users input"""
+        if command_name not in self.commands:
+            return False, f"Команда '{command_name}' не найдена."
+
+        command = self.commands[command_name]
+        return command.human_readable_parameters()
+
     def validate_command(self, command_name: str, parameters: dict = None) -> tuple[bool, str | None]:
         """
         Validate command parameters before execution.

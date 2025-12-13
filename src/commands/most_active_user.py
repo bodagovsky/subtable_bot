@@ -21,6 +21,10 @@ class MostActiveUserCommand(BaseCommand):
             name="most_active_user",
             description="Найти топ-3 самых активных пользователей в чате за указанный временной период (максимум 1 неделя)"
         )
+        self.require_parameters = True
+        self.parameters = """
+        time_window: временной промежуток, за который необходимо посчитать самых активных пользователей, в часах
+        """
     
     def validate_parameters(self, parameters: dict = None) -> tuple[bool, str | None]:
         """Validate that time_window_hours is a valid positive number <= 168 hours."""
