@@ -11,8 +11,19 @@ class BaseCommand(ABC):
     """Base class for all bot commands."""
     
     def __init__(self, name: str, description: str):
+        """
+        Wether the command requires the user to provide parameters for execution
+        """
+        self.require_parameters = False
         self.name = name
         self.description = description
+        self.parameters = ""
+
+    def requires_parameters(self) -> bool:
+        return self.require_parameters
+
+    def human_readable_parameters(self) -> str:
+        return self.parameters
     
     def validate_parameters(self, parameters: dict = None) -> Tuple[bool, Optional[str]]:
         """

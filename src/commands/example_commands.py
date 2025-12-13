@@ -34,6 +34,11 @@ class RandomNumberCommand(BaseCommand):
             name="random_number",
             description="Сгенерировать случайное число между min и max (по умолчанию: 1-100)"
         )
+        self.require_parameters = True
+        self.parameters = """
+        min: нижняя граница для генерации случайного числа
+        max: верхняя граница для генерации случайного числа
+        """
     
     def validate_parameters(self, parameters: dict = None) -> tuple[bool, str | None]:
         """Validate that min and max are valid integers."""
@@ -80,6 +85,10 @@ class EchoCommand(BaseCommand):
             name="echo",
             description="Повторить сообщение или текст"
         )
+        self.require_parameters = True
+        self.parameters = """
+        msg: сообщение, которое необходимо повторить
+        """
     
     async def execute(self, parameters: dict = None, update=None, context=None, chatgpt_client=None) -> Event:
         params = parameters or {}

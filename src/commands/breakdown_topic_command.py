@@ -1,7 +1,6 @@
 """Breakdown topic command implementation."""
 from .base import BaseCommand
-from typing import Optional, List, Dict
-from telegram import Bot
+from typing import List, Dict
 import logging
 import sys
 import os
@@ -23,6 +22,10 @@ class BreakdownTopicCommand(BaseCommand):
             name="breakdown_topic",
             description="Разобрать подробно конкретную тему обсуждения"
         )
+        self.require_parameters = True
+        self.parameters = """
+        topic_query: название темы обсуждения, которую необходимо разобрать подробно (например, "загрязнение воздуха", "политика", "новости")
+        """
         self.chatgpt = ChatGPTClient()
     
     def validate_parameters(self, parameters: Dict = None) -> tuple[bool, str | None]:
@@ -75,30 +78,6 @@ class BreakdownTopicCommand(BaseCommand):
         params = parameters or {}
         topic_query = params.get("topic_query", "").strip()
         
-        # Step 1: If topic_query is not provided, try to extract from user_message using OpenAI
-        if not topic_query and user_message and chatgpt_client:
-            logger.info(f"Attempting to extract topic_query from user message: {user_message}")
-            extraction_result = chatgpt_client.extract_topic_query(user_message)
-            
-            if extraction_result.get("success") and extraction_result.get("topic_query"):
-                # Topic query extracted successfully
-                topic_query = extraction_result["topic_query"]
-                params["topic_query"] = topic_query
-                logger.info(f"Extracted topic_query: {topic_query}")
-            else:
-                # Extraction failed - ask user to provide explicitly
-                reasoning = extraction_result.get("reasoning", "Не удалось определить тему")
-                logger.info(f"Topic query extraction failed: {reasoning}")
-                await message_obj.reply_text(
-                    "Прошу прощения, сэр/мадам. Я не смог определить тему из вашего сообщения.\n\n"
-                    "Пожалуйста, укажите явно тему, которую вы хотите разобрать (например, 'загрязнение воздуха', 'политика', 'новости')."
-                )
-                return Event.PARAMETERS_UNCLEAR
-        
-        if not topic_query:
-            await message_obj.reply_text("Прошу прощения, сэр/мадам, но вы не указали тему. Пожалуйста, укажите тему, которую вы хотите разобрать.")
-            return Event.PARAMETERS_UNCLEAR
-        
         try:
             # Get all topic keys for this channel
             topic_handles = redis_client.get_all_topic_keys(chat_id)
@@ -117,6 +96,32 @@ class BreakdownTopicCommand(BaseCommand):
             if not topics:
                 await message_obj.reply_text("Прошу прощения, сэр/мадам, но не удалось загрузить темы обсуждения.")
                 return Event.COMMAND_EXECUTED
+            
+            # Step 1: If topic_query is not provided, try to extract from user_message using OpenAI
+            # Pass known topics to help with extraction
+            if not topic_query and user_message and chatgpt_client:
+                logger.info(f"Attempting to extract topic_query from user message: {user_message}")
+                extraction_result = chatgpt_client.extract_topic_query(user_message, known_topics=topics)
+                
+                if extraction_result.get("success") and extraction_result.get("topic_query"):
+                    # Topic query extracted successfully
+                    topic_query = extraction_result["topic_query"]
+                    params["topic_query"] = topic_query
+                    logger.info(f"Extracted topic_query: {topic_query}")
+                else:
+                    # Extraction failed - ask user to provide explicitly
+                    reasoning = extraction_result.get("reasoning", "Не удалось определить тему")
+                    logger.info(f"Topic query extraction failed: {reasoning}")
+                    await message_obj.reply_text(
+                        "Прошу прощения, сэр/мадам. Я не смог определить тему из вашего сообщения.\n\n"
+                        "Пожалуйста, укажите явно тему, которую вы хотите разобрать (например, 'загрязнение воздуха', 'политика', 'новости')."
+                    )
+                    return Event.PARAMETERS_UNCLEAR
+            
+            if not topic_query:
+                await message_obj.reply_text("Прошу прощения, сэр/мадам, но вы не указали тему. Пожалуйста, укажите тему, которую вы хотите разобрать.")
+                return Event.PARAMETERS_UNCLEAR
+            
             
             # Match user query to topics using OpenAI
             if not chatgpt_client:

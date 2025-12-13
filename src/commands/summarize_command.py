@@ -25,6 +25,11 @@ class SummarizeCommand(BaseCommand):
             name="summarize",
             description="Суммаризировать обсуждения за указанный период или количество сообщений (минимум: 15 сообщений или 30 минут, максимум: 1000 сообщений или 24 часа)"
         )
+        self.require_parameters = True
+        self.parameters = """
+        message_count: количество сообщений, которое необходимо проанализировать для выполнения команды. 0 если указан параметр time_window
+        time_window_hours: временной отрезок, за который необходимо проанализировать сообщения; указывается в часах
+        """
         self.chatgpt = ChatGPTClient()
     
     def validate_parameters(self, parameters: dict = None) -> tuple[bool, str | None]:
