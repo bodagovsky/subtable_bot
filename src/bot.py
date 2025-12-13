@@ -6,12 +6,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import logging
 import re
-import asyncio
-from aiohttp import web
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from config import (
-    TELEGRAM_BOT_TOKEN, WEBHOOK_URL, WEBHOOK_PORT, WEBHOOK_PATH, WEBHOOK_SECRET_TOKEN,
+    TELEGRAM_BOT_TOKEN,
     COMMAND_PROBABILITY_HIGH_THRESHOLD, COMMAND_PROBABILITY_LOW_THRESHOLD
 )
 from chatgpt_client import ChatGPTClient
@@ -880,52 +878,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.debug(f"Could not store message: {e}")
 
 
-async def webhook_handler(request: web.Request) -> web.Response:
-    """Handle incoming webhook requests from Telegram."""
-    # Verify secret token if configured
-    if WEBHOOK_SECRET_TOKEN:
-        token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-        if token != WEBHOOK_SECRET_TOKEN:
-            logger.warning("Webhook request with invalid secret token")
-            return web.Response(status=403, text="Forbidden")
-    
-    application = request.app["application"]
-    
-    # Get the update from the request
-    update_data = await request.json()
-    update = Update.de_json(update_data, application.bot)
-    
-    # Process the update
-    await application.process_update(update)
-    
-    return web.Response(text="OK")
-
-
-async def setup_webhook(application: Application) -> None:
-    """Set up the webhook with Telegram."""
-    if not WEBHOOK_URL:
-        raise ValueError("WEBHOOK_URL not set in environment variables")
-    
-    webhook_url = f"{WEBHOOK_URL.rstrip('/')}{WEBHOOK_PATH}"
-    
-    # Set webhook
-    await application.bot.set_webhook(
-        url=webhook_url,
-        secret_token=WEBHOOK_SECRET_TOKEN if WEBHOOK_SECRET_TOKEN else None,
-        allowed_updates=Update.ALL_TYPES
-    )
-    
-    logger.info(f"Webhook set to: {webhook_url}")
-
-
-async def remove_webhook(application: Application) -> None:
-    """Remove the webhook from Telegram."""
-    await application.bot.delete_webhook(drop_pending_updates=True)
-    logger.info("Webhook removed")
-
-
-async def create_app() -> web.Application:
-    """Create and configure the aiohttp web application."""
+def create_application() -> Application:
+    """Create and configure the Telegram bot application."""
     if not TELEGRAM_BOT_TOKEN:
         raise ValueError("TELEGRAM_BOT_TOKEN not set in environment variables")
     
@@ -941,67 +895,24 @@ async def create_app() -> web.Application:
     # The handler will check for mentions and replies internally
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    # Initialize application (this will call initialize() on all handlers)
-    await application.initialize()
-    
-    # Set up webhook
-    await setup_webhook(application)
-    
-    # Create aiohttp app
-    app = web.Application()
-    app["application"] = application
-    
-    # Add webhook route
-    app.router.add_post(WEBHOOK_PATH, webhook_handler)
-    
-    # Add health check route
-    async def health_check(request: web.Request) -> web.Response:
-        return web.Response(text="Bot is running")
-    
-    app.router.add_get("/health", health_check)
-    
-    # Cleanup on shutdown
-    async def on_shutdown(app: web.Application) -> None:
-        await remove_webhook(app["application"])
-        await app["application"].shutdown()
-    
-    app.on_shutdown.append(on_shutdown)
-    
-    return app
-
-
-async def main_async():
-    """Async main function to set up and run the webhook server."""
-    logger.info("Bot starting with webhook...")
-    logger.info(f"Webhook URL: {WEBHOOK_URL}")
-    logger.info(f"Webhook port: {WEBHOOK_PORT}")
-    logger.info(f"Webhook path: {WEBHOOK_PATH}")
-    logger.info("Bot supports both private chats and channels!")
-    logger.info("For channels: Add bot as admin OR mention the bot in messages")
-    
-    # Create the web application
-    app = await create_app()
-    
-    # Start the web server
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", WEBHOOK_PORT)
-    await site.start()
-    
-    logger.info(f"Webhook server started on port {WEBHOOK_PORT}")
-    logger.info(f"Waiting for updates at {WEBHOOK_URL}{WEBHOOK_PATH}")
-    
-    # Keep the server running
-    try:
-        await asyncio.Event().wait()  # Wait indefinitely
-    except KeyboardInterrupt:
-        logger.info("Shutting down...")
-        await runner.cleanup()
+    return application
 
 
 def main():
-    """Start the bot with webhook."""
-    asyncio.run(main_async())
+    """Start the bot with long polling."""
+    logger.info("Bot starting with long polling...")
+    logger.info("Bot supports both private chats and channels!")
+    logger.info("For channels: Add bot as admin OR mention the bot in messages")
+    
+    # Create and configure the application
+    application = create_application()
+    
+    # Start the bot using long polling
+    # This will run until interrupted (Ctrl+C)
+    application.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True
+    )
 
 
 if __name__ == "__main__":
