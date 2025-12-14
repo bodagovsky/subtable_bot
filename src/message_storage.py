@@ -20,7 +20,7 @@ class MessageStorage:
         # Keep only last 7 days of messages (handled automatically in Redis)
         self.max_age_days = 7
     
-    def add_message(self, chat_id: int, user_id: int, message_id: int, timestamp: datetime):
+    def add_message(self, chat_id: int, user_id: int, message_id: int, timestamp: datetime) -> bool:
         """
         Add a message to Redis storage.
         
@@ -29,18 +29,24 @@ class MessageStorage:
             user_id: User ID
             message_id: Message ID
             timestamp: Message timestamp
+
+        Returns:
+            True if the message is new (successfully stored), False if message already exists
         """
         # Ensure timestamp is timezone-aware (UTC)
         if timestamp.tzinfo is None:
             timestamp = utc.localize(timestamp)
         
         # Append message to Redis (automatically cleans old messages)
-        success = self.redis.append_message(chat_id, user_id, message_id, timestamp)
+        # Returns True if message is new, False if already exists
+        is_new = self.redis.append_message(chat_id, user_id, message_id, timestamp)
         
-        if success:
-            logger.debug(f"Stored message {message_id} from user {user_id} in chat {chat_id}")
+        if is_new:
+            logger.debug(f"Stored new message {message_id} from user {user_id} in chat {chat_id}")
         else:
-            logger.warning(f"Failed to store message {message_id} from user {user_id} in chat {chat_id}")
+            logger.debug(f"Message {message_id} from user {user_id} in chat {chat_id} already exists")
+        
+        return is_new
     
     def get_user_counts(self, chat_id: int, time_window_hours: float) -> Dict[int, int]:
         """

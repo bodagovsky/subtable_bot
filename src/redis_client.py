@@ -90,7 +90,7 @@ class RedisClient:
             message_timestamp: Message timestamp (datetime object)
             
         Returns:
-            True if successful, False otherwise
+            True if message is new (successfully added), False if message already exists
         """
         try:
             key = self.build_channel_messages_key(channel_id)
@@ -104,7 +104,16 @@ class RedisClient:
             # Add message to sorted set with timestamp as score
             # ZADD returns the number of elements added (1 if new, 0 if already exists)
             # Note: redis-py zadd accepts dict mapping member to score
-            result = self.client.zadd(key, {message_value: unix_timestamp})
+            # Using nx=True to only add if not exists (idempotency)
+            result = self.client.zadd(key, {message_value: unix_timestamp}, nx=True)
+            
+            # result is 1 if message was added (new), 0 if already exists
+            is_new_message = result > 0
+            
+            if is_new_message:
+                logger.debug(f"Stored new message {message_id} from user {user_id} in channel {channel_id}")
+            else:
+                logger.debug(f"Message {message_id} from user {user_id} in channel {channel_id} already exists")
             
             # Remove messages older than 7 days
             # Calculate cutoff timestamp (7 days ago)
@@ -117,8 +126,8 @@ class RedisClient:
             if removed_count > 0:
                 logger.debug(f"Removed {removed_count} old messages from channel {channel_id}")
             
-            logger.debug(f"Stored message {message_id} from user {user_id} in channel {channel_id}")
-            return True
+            # Return True if message is new, False if already exists
+            return is_new_message
             
         except Exception as e:
             logger.error(f"Error appending message to Redis: {e}")

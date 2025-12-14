@@ -561,6 +561,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     chat_id = message_obj.chat.id
     user_id = message_obj.from_user.id if message_obj.from_user else None
+
+    if message_obj.from_user:
+        try:
+            message_timestamp = datetime.now()
+            if message_obj.date:
+                message_timestamp = message_obj.date
+            is_new_message = message_storage.add_message(
+                chat_id=chat_id,
+                user_id=message_obj.from_user.id,
+                message_id=message_obj.message_id,
+                timestamp=message_timestamp
+            )
+            # If message already stored, return early (idempotency)
+            if not is_new_message:
+                return
+        except Exception as e:
+            logger.debug(f"Could not store message: {e}")
     
     # Step 1: Check if bot is silenced (using Redis)
     is_silenced = redis_client.is_bot_silenced(chat_id)
@@ -646,12 +663,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 message_timestamp = datetime.now()
                 if message_obj.date:
                     message_timestamp = message_obj.date
-                message_storage.add_message(
+                is_new_message = message_storage.add_message(
                     chat_id=chat_id,
                     user_id=message_obj.from_user.id,
                     message_id=message_obj.message_id,
                     timestamp=message_timestamp
                 )
+                # If message already stored, return early (idempotency)
+                if not is_new_message:
+                    return
             except Exception as e:
                 logger.debug(f"Could not store message: {e}")
             return
@@ -661,16 +681,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Step 4: Get current user state from context
     current_state = context.user_data.get("user_state", UserState.INIT)
     current_command = context.user_data.get("current_command")
+
     
-    # Step 5: Analyze message to get command probabilities
-    # available_commands = command_handler.get_available_commands()
-    # analysis = chatgpt.analyze_message(user_message, available_commands)
-    # commands_with_probs = analysis.get("commands", [])
-    
-    # logger.info(f"ChatGPT analysis: {analysis}")
-    # logger.info(f"Current user state: {current_state}, current command: {current_command}")
-    
-    # Step 6: Handle based on current state
+    # Step 5: Handle based on current state
     if current_state == UserState.PENDING_COMMAND_CLARIFICATION:
         # Perform commands extraction
         available_commands = command_handler.get_available_commands()
@@ -863,21 +876,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Command request that wasn't understood - ask for clarification
                 clarification_message = chatgpt.generate_clarification(user_message, available_commands)
                 await message_obj.reply_text(clarification_message)
-    
-    # Step 7: Store message for tracking
-    if message_obj.from_user:
-        try:
-            message_timestamp = datetime.now()
-            if message_obj.date:
-                message_timestamp = message_obj.date
-            message_storage.add_message(
-                chat_id=chat_id,
-                user_id=message_obj.from_user.id,
-                message_id=message_obj.message_id,
-                timestamp=message_timestamp
-            )
-        except Exception as e:
-            logger.debug(f"Could not store message: {e}")
 
 
 async def webhook_handler(request: web.Request) -> web.Response:
