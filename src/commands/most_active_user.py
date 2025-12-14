@@ -23,7 +23,7 @@ class MostActiveUserCommand(BaseCommand):
         )
         self.require_parameters = True
         self.parameters = """
-        time_window: временной промежуток, за который необходимо посчитать самых активных пользователей, в часах
+        time_window_hours: временной промежуток, за который необходимо посчитать самых активных пользователей, в часах
         """
     
     def validate_parameters(self, parameters: dict = None) -> tuple[bool, str | None]:
