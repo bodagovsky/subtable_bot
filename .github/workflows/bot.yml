@@ -50,7 +50,6 @@ jobs:
           TELEGRAM_BOT_TOKEN="${{ secrets.TELEGRAM_BOT_TOKEN }}" \
           TELEGRAM_API_HASH="${{ secrets.TELEGRAM_API_HASH }}" \
           TELEGRAM_API_ID="${{ secrets.TELEGRAM_API_ID }}" \
-          TELEGRAM_MCP_ALLOWED_CHAT_IDS="${{ secrets.TELEGRAM_MCP_ALLOWED_CHAT_IDS }}" \
           TELEGRAM_MCP_AUTH_TOKEN="${{ secrets.TELEGRAM_MCP_AUTH_TOKEN }}" \
           REDISCLOUD_URL="${{ secrets.REDISCLOUD_URL }}" \
           REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \

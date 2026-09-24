@@ -6,6 +6,7 @@ from enum import Enum
 from datetime import datetime, timedelta
 import logging
 import json
+import secrets
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,46 @@ class RedisClient:
     def build_agents_api_session_key(self, chat_id: int, thread_id: Optional[int]) -> str:
         """One managed Agents API conversation per Telegram chat topic."""
         return f"telegram:agents-api-session:{chat_id}:{thread_id or 0}"
+
+    def build_agent_delivery_key(self, delivery_id: str) -> str:
+        """Key for a short-lived, single-use reply capability."""
+        return f"telegram:agent-delivery:{delivery_id}"
+
+    def create_agent_delivery(
+        self,
+        chat_id: int,
+        message_id: int,
+        thread_id: Optional[int],
+        ttl_seconds: int = 15 * 60,
+    ) -> str:
+        """Store webhook-derived reply routing data and return an opaque ID.
+
+        The ID is supplied to the agent, while the actual Telegram chat and
+        message IDs stay in Redis.  It expires quickly and is consumed by the
+        reply tool, so it cannot be used to target another chat or replay a
+        completed reply.
+        """
+        delivery_id = secrets.token_urlsafe(24)
+        payload = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "thread_id": thread_id,
+        }
+        self.client.setex(
+            self.build_agent_delivery_key(delivery_id),
+            ttl_seconds,
+            json.dumps(payload, ensure_ascii=False),
+        )
+        return delivery_id
+
+    def get_agent_delivery(self, delivery_id: str) -> Optional[dict]:
+        payload = self.client.get(self.build_agent_delivery_key(delivery_id))
+        return json.loads(payload) if payload else None
+
+    def consume_agent_delivery(self, delivery_id: str) -> Optional[dict]:
+        """Atomically consume a delivery capability before its side effect."""
+        payload = self.client.getdel(self.build_agent_delivery_key(delivery_id))
+        return json.loads(payload) if payload else None
     
     def append_message(self, channel_id: int, user_id: int, message_id: int, message_timestamp: datetime) -> bool:
         """

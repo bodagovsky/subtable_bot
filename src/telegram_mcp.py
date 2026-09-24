@@ -22,6 +22,7 @@ from telegram import Bot
 
 from mtproto_client import get_mtproto_client
 from message_storage import message_storage
+from redis_client import redis_client
 
 
 MAX_MESSAGE_LENGTH = 4096
@@ -68,7 +69,10 @@ def _assert_can_send(chat_id: int, text: str) -> None:
 
 
 async def _send_telegram_message(
-    chat_id: int, text: str, reply_to_message_id: int | None = None
+    chat_id: int,
+    text: str,
+    reply_to_message_id: int | None = None,
+    thread_id: int | None = None,
 ) -> dict[str, Any]:
     """Perform the send operation shared by the two MCP tool wrappers."""
     _assert_can_send(chat_id, text)
@@ -77,6 +81,7 @@ async def _send_telegram_message(
             chat_id=chat_id,
             text=text,
             reply_to_message_id=reply_to_message_id,
+            message_thread_id=thread_id,
         )
     return {"chat_id": sent.chat_id, "message_id": sent.message_id, "sent_at": sent.date.isoformat()}
 
@@ -141,14 +146,21 @@ def _parse_timestamp(value: str) -> datetime:
     return timestamp
 
 
+def _delivery(delivery_id: str) -> dict[str, Any]:
+    """Resolve a webhook-derived delivery capability without exposing chat IDs."""
+    delivery = redis_client.get_agent_delivery(delivery_id)
+    if not delivery:
+        raise RuntimeError("delivery_id is unknown, expired, or already used")
+    return delivery
+
+
 def create_server(host: str = "127.0.0.1", port: int = 8000) -> FastMCP:
     """Create the server separately so it can be imported by an ASGI host/tests."""
     server = FastMCP(
         "Telegram",
         instructions=(
-            "Read recent Telegram messages to understand the conversation. "
-            "Before using telegram_send_message, verify the target chat and the "
-            "exact content with the user when the request is consequential."
+            "Every tool call needs the current delivery_id supplied by the task. "
+            "It identifies one webhook conversation and cannot select a chat."
         ),
         host=host,
         port=port,
@@ -157,26 +169,26 @@ def create_server(host: str = "127.0.0.1", port: int = 8000) -> FastMCP:
     )
 
     @server.tool()
-    async def telegram_get_recent_messages(chat_id: int, limit: int = 20) -> list[dict[str, Any]]:
-        """Read up to 100 newest messages from an accessible Telegram chat.
+    async def telegram_get_recent_messages(delivery_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        """Read up to 100 newest messages in the current webhook chat.
 
         Uses the project's existing Telethon/MTProto credentials.  The result is
         newest first.  It contains text and metadata, not media files.
         """
-        return await _read_recent_messages(chat_id, limit)
+        return await _read_recent_messages(_delivery(delivery_id)["chat_id"], limit)
 
     @server.tool()
-    async def telegram_get_messages_by_ids(chat_id: int, message_ids: list[int]) -> list[dict[str, Any]]:
+    async def telegram_get_messages_by_ids(delivery_id: str, message_ids: list[int]) -> list[dict[str, Any]]:
         """Read specific Telegram messages previously seen by this bot.
 
         Use this to inspect the message the user replied to, or the IDs returned
         by a time-range query. Text is retrieved from Telegram only on demand.
         """
-        return await _read_messages_by_ids(chat_id, message_ids)
+        return await _read_messages_by_ids(_delivery(delivery_id)["chat_id"], message_ids)
 
     @server.tool()
     async def telegram_get_messages_in_time_range(
-        chat_id: int, start_time: str, end_time: str | None = None
+        delivery_id: str, start_time: str, end_time: str | None = None
     ) -> list[dict[str, Any]]:
         """Read indexed chat messages in an ISO-8601 time range, oldest first.
 
@@ -184,18 +196,20 @@ def create_server(host: str = "127.0.0.1", port: int = 8000) -> FastMCP:
         for its message IDs from Telegram and is the preferred tool for a
         question such as 'what did we discuss in the last two hours?'.
         """
+        chat_id = _delivery(delivery_id)["chat_id"]
         start = _parse_timestamp(start_time)
         end = _parse_timestamp(end_time) if end_time else None
         indexed = message_storage.get_messages_in_period(chat_id, start, end)
         return await _read_messages_by_ids(chat_id, [message_id for _, message_id, _ in indexed])
 
     @server.tool()
-    async def telegram_get_top_speakers_by_reactions(chat_id: int, hours: float = 168) -> list[dict[str, Any]]:
+    async def telegram_get_top_speakers_by_reactions(delivery_id: str, hours: float = 168) -> list[dict[str, Any]]:
         """Rank the top three authors by reactions received on their messages.
 
         The default period is seven days. Counts are read from Telegram at query
         time for messages indexed during that period.
         """
+        chat_id = _delivery(delivery_id)["chat_id"]
         _assert_chat_allowed(chat_id)
         if not 0 < hours <= 24 * 7:
             raise ValueError("hours must be greater than 0 and at most 168")
@@ -233,13 +247,22 @@ def create_server(host: str = "127.0.0.1", port: int = 8000) -> FastMCP:
         return await _send_telegram_message(chat_id, text, reply_to_message_id)
 
     @server.tool()
-    async def telegram_reply(chat_id: int, reply_to_message_id: int, text: str) -> dict[str, Any]:
+    async def telegram_reply(delivery_id: str, text: str) -> dict[str, Any]:
         """Reply once to the current Telegram request.
 
-        Use only the chat_id and message_id from the trusted task metadata. This
-        is the only message-delivery tool exposed to the remote agent.
+        The server resolves and consumes delivery_id to obtain the chat, original
+        message, and optional forum topic. This is the only message-delivery tool
+        exposed to the remote agent.
         """
-        return await _send_telegram_message(chat_id, text, reply_to_message_id)
+        delivery = redis_client.consume_agent_delivery(delivery_id)
+        if not delivery:
+            raise RuntimeError("delivery_id is unknown, expired, or already used")
+        return await _send_telegram_message(
+            delivery["chat_id"],
+            text,
+            delivery["message_id"],
+            delivery.get("thread_id"),
+        )
 
     @server.tool()
     async def telegram_get_bot_identity() -> dict[str, Any]:

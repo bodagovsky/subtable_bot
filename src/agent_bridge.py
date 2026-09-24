@@ -77,6 +77,11 @@ async def enqueue_update(update: Update, bot_id: int) -> bool:
             return False
 
         replied_message_id = message.reply_to_message.message_id if message.reply_to_message else None
+        delivery_id = redis_client.create_agent_delivery(
+            chat_id=message.chat_id,
+            message_id=message.message_id,
+            thread_id=message.message_thread_id,
+        )
         redis_client.enqueue_agent_job(
             {
                 "chat_id": message.chat_id,
@@ -84,6 +89,7 @@ async def enqueue_update(update: Update, bot_id: int) -> bool:
                 "thread_id": message.message_thread_id,
                 "message_id": message.message_id,
                 "reply_to_message_id": replied_message_id,
+                "delivery_id": delivery_id,
                 "text": user_text,
                 "timestamp": timestamp.isoformat(),
             }

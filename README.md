@@ -66,7 +66,6 @@ Point an MCP client at it with this configuration (use an absolute path):
         "TELEGRAM_BOT_TOKEN": "...",
         "TELEGRAM_API_ID": "...",
         "TELEGRAM_API_HASH": "...",
-        "TELEGRAM_MCP_ALLOWED_CHAT_IDS": "-1001234567890"
       }
     }
   }
@@ -75,9 +74,12 @@ Point an MCP client at it with this configuration (use an absolute path):
 
 Available tools include `telegram_get_recent_messages`,
 `telegram_get_messages_by_ids`, `telegram_get_messages_in_time_range`,
-`telegram_get_top_speakers_by_reactions`, and `telegram_reply`. The allow-list
-restricts both reads and writes. For a dry run or a client that should never send,
-set `TELEGRAM_MCP_READ_ONLY=true`.
+`telegram_get_top_speakers_by_reactions`, and `telegram_reply`. Each call uses a
+short-lived `delivery_id` created from an incoming webhook and stored in Redis;
+the server resolves the target chat and original message itself. This means a
+remote agent cannot choose a chat ID or replay a completed reply. Optionally set
+`TELEGRAM_MCP_ALLOWED_CHAT_IDS` as an additional static fence. For a dry run or a
+client that should never send, set `TELEGRAM_MCP_READ_ONLY=true`.
 
 For a remote service outside Heroku, run:
 
@@ -133,8 +135,10 @@ MCP tools do not themselves receive Telegram updates. To make the agent respond
 proactively in a group, this project now has a Redis-backed bridge and one worker.
 The webhook indexes an incoming message without storing its text, recognizes an
 initial `Альфред`/`Alfred` invocation (a comma is optional) or a reply to Alfred,
-and queues it. The worker calls the agent, which selects MCP tools itself and
-sends its own reply through the protected MCP server.
+and queues it. The webhook also saves a 15-minute, one-time delivery capability
+with the real chat/message/topic IDs in Redis. The worker gives only that opaque
+ID to the agent, which selects MCP tools itself and sends its own reply through
+the protected MCP server.
 
 Start the services in separate terminals:
 
