@@ -114,6 +114,7 @@ async def _create_session(job: dict[str, Any]) -> str:
     process.stdin.close()
     session_id: str | None = None
     session_routing_bound = False
+    turn_completed = False
     non_sse_output: list[str] = []
     terminal = {"agent.session.turn.completed", "agent.session.turn.failed", "agent.session.turn.cancelled", "agent.session.failed"}
     try:
@@ -140,13 +141,16 @@ async def _create_session(job: dict[str, Any]) -> str:
             if event_type in terminal:
                 if event_type != "agent.session.turn.completed":
                     raise AgentsAPIError(json.dumps(event, ensure_ascii=False))
+                turn_completed = True
                 break
     finally:
         if process.returncode is None:
             process.terminate()
         await process.wait()
     stderr = (await process.stderr.read()).decode().strip()
-    if process.returncode:
+    # We close curl after the terminal event. That intentional SIGTERM can
+    # produce a non-zero curl code even though the agent turn succeeded.
+    if process.returncode and not turn_completed:
         details = "\n".join(non_sse_output).strip()
         raise AgentsAPIError(details or stderr or f"Agents API create-session curl exited {process.returncode}")
     if not session_id:
