@@ -20,7 +20,9 @@ class MessageStorage:
         # Keep only last 7 days of messages (handled automatically in Redis)
         self.max_age_days = 7
     
-    def add_message(self, chat_id: int, user_id: int, message_id: int, timestamp: datetime) -> bool:
+    def add_message(
+        self, chat_id: int, user_id: int, message_id: int, timestamp: datetime, thread_id: int | None = None
+    ) -> bool:
         """
         Add a message to Redis storage.
         
@@ -39,7 +41,7 @@ class MessageStorage:
         
         # Append message to Redis (automatically cleans old messages)
         # Returns True if message is new, False if already exists
-        is_new = self.redis.append_message(chat_id, user_id, message_id, timestamp)
+        is_new = self.redis.store_message_index(chat_id, user_id, message_id, timestamp, thread_id)
         
         if is_new:
             logger.debug(f"Stored new message {message_id} from user {user_id} in chat {chat_id}")
@@ -80,7 +82,22 @@ class MessageStorage:
         
         return dict(user_counts)
 
+    def get_messages_in_period(self, chat_id: int, start_time: datetime, end_time: datetime | None = None):
+        """Return compact message records; message text remains in Telegram."""
+        return self.redis.get_indexed_messages_by_time_range(chat_id, start_time, end_time)
+
+    def record_reaction_count(self, chat_id: int, message_id: int, total_count: int) -> None:
+        self.redis.store_reaction_count(chat_id, message_id, total_count)
+
+    def adjust_reaction_count(self, chat_id: int, message_id: int, delta: int) -> None:
+        self.redis.adjust_reaction_count(chat_id, message_id, delta)
+
+    def get_top_speakers_by_reactions(
+        self, chat_id: int, time_window_hours: float = 24 * 7, limit: int = 3
+    ):
+        cutoff = datetime.now(utc) - timedelta(hours=time_window_hours)
+        return self.redis.get_top_speakers_by_reactions(chat_id, cutoff, limit=limit)
+
 
 # Global message storage instance
 message_storage = MessageStorage()
-

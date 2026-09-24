@@ -38,6 +38,117 @@ undertable bot/
 - **Smart confirmation**: Bot only asks for confirmation when multiple commands match or confidence is low
 - **Clarification requests**: Bot asks for clarification when commands are unclear
 
+## Telegram MCP server
+
+`src/telegram_mcp.py` exposes the bot's Telegram capabilities as MCP tools for an
+agent. It keeps the existing Telegram SDK choices: the Bot API
+(`python-telegram-bot`) sends messages, and Telethon/MTProto reads recent history.
+
+Install dependencies and start a local stdio server:
+
+```bash
+pip install -r requirements.txt
+python src/telegram_mcp.py
+```
+
+Copy `.env.example` to `.env` and fill in the Telegram, Redis, and OpenAI
+credentials before starting the bridge or worker.
+
+Point an MCP client at it with this configuration (use an absolute path):
+
+```json
+{
+  "mcpServers": {
+    "telegram": {
+      "command": "python3",
+      "args": ["/absolute/path/to/undertable bot/src/telegram_mcp.py"],
+      "env": {
+        "TELEGRAM_BOT_TOKEN": "...",
+        "TELEGRAM_API_ID": "...",
+        "TELEGRAM_API_HASH": "...",
+        "TELEGRAM_MCP_ALLOWED_CHAT_IDS": "-1001234567890"
+      }
+    }
+  }
+}
+```
+
+Available tools include `telegram_get_recent_messages`,
+`telegram_get_messages_by_ids`, `telegram_get_messages_in_time_range`,
+`telegram_get_top_speakers_by_reactions`, and `telegram_reply`. The allow-list
+restricts both reads and writes. For a dry run or a client that should never send,
+set `TELEGRAM_MCP_READ_ONLY=true`.
+
+For a remote service outside Heroku, run:
+
+```bash
+python src/telegram_mcp.py --transport streamable-http --host 127.0.0.1 --port 8000
+```
+
+The endpoint is `http://127.0.0.1:8000/mcp`. Do not expose it directly to the
+internet: validate a bearer token before proxying it. On Heroku, use
+`src/mcp_gateway.py`; it listens on Heroku's `$PORT`, validates the bearer token,
+and forwards to the local MCP process. Streamable HTTP is the recommended network
+transport for the managed agent; stdio remains useful for local development.
+
+## Background OpenAI Agents API worker
+
+`src/agent_worker.py` uses `curl` to call the Agents HTTP API for the saved **AI
+teammate for Telegram** agent. It stores one durable `session_id` per chat topic
+in Redis, streams events, and exposes only selected Telegram MCP tools. The agent
+uses `telegram_reply` itself for both completed answers and clarification questions;
+the worker never duplicates that Telegram message.
+
+The remote MCP connection is made by OpenAI (`connection_origin: service`) and
+uses `environment: none`, so this production flow does **not** need a local Codex
+executor or `OPENAI_EXECUTOR_API_KEY`.
+
+```bash
+cp .env.example .env
+# Fill in all Telegram, Redis, OpenAI, and TELEGRAM_MCP_* values.
+pip install -r requirements.txt
+python src/telegram_mcp.py --transport streamable-http --host 127.0.0.1 --port 8000
+# In separate terminals:
+python src/bot.py
+python src/agent_worker.py
+```
+
+Create an application key in OpenAI project `proj_jCMxrtupTQBmWaQIW2kdOXHA` with
+`api.agents.read`, `api.agents.write`, and `api.responses.write`. Set
+`TELEGRAM_MCP_URL` to the public HTTPS address served by Caddy (for example,
+`https://mcp.example.com/mcp`) and use a randomly generated 32+-character
+`TELEGRAM_MCP_AUTH_TOKEN` in both the worker environment and the Caddy service.
+
+```bash
+openssl rand -hex 32
+```
+
+For Heroku, deploy the same repository to two apps. Set `HEROKU_SERVICE_ROLE=mcp`
+only on the MCP app. Run `web=1 worker=1` on the Telegram app and `web=1` on the
+MCP app. The GitHub Actions workflow synchronizes their separate config vars;
+set `HEROKU_TELEGRAM_APP_NAME` and `HEROKU_MCP_APP_NAME` as GitHub Variables.
+Never commit `.env`, the OpenAI key, Telegram credentials, or the MCP bearer token.
+
+MCP tools do not themselves receive Telegram updates. To make the agent respond
+proactively in a group, this project now has a Redis-backed bridge and one worker.
+The webhook indexes an incoming message without storing its text, recognizes an
+initial `Альфред`/`Alfred` invocation (a comma is optional) or a reply to Alfred,
+and queues it. The worker calls the agent, which selects MCP tools itself and
+sends its own reply through the protected MCP server.
+
+Start the services in separate terminals:
+
+```bash
+python src/bot.py
+python src/agent_worker.py
+```
+
+The worker defaults to `gpt-5-nano`; set `OPENAI_AGENT_MODEL` to override it. It
+uses OpenAI web search only for fact checking/current information and includes
+source links in those answers. Set `OPENAI_API_KEY` alongside the existing
+Telegram and Redis variables. The bot must receive `message_reaction` and
+`message_reaction_count` updates to build the reaction leaderboard.
+
 ## Setup
 
 ### Local Development
@@ -364,4 +475,3 @@ The bot reads configuration in the following order (later values override earlie
 5. The `.github/workflows/bot.yml` workflow will automatically use these secrets
 
 **Security Note**: Never commit secrets to your repository. Always use GitHub Secrets or environment variables.
-

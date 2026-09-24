@@ -137,6 +137,23 @@ class MTProtoClient:
             logger.error(f"Unexpected error getting messages: {e}")
             # Return list of None values for all requested message IDs
             return [None] * len(message_ids)
+
+    async def get_recent_messages(self, chat_id: int, limit: int) -> List[Message]:
+        """Return newest messages from an already accessible chat.
+
+        This is used by the MCP server to give an agent conversational context.
+        Telethon resolves the peer from the signed-in bot's entity cache.
+        """
+        if not self.client.is_connected():
+            await self.start()
+
+        try:
+            entity = await self.client.get_entity(chat_id)
+            messages = await self.client.get_messages(entity, limit=limit)
+            return list(messages)
+        except Exception as exc:
+            logger.error(f"Could not retrieve recent messages from {chat_id}: {exc}")
+            raise RuntimeError(f"Could not retrieve messages from chat {chat_id}") from exc
     
     async def __aenter__(self):
         """Async context manager entry."""
@@ -163,4 +180,3 @@ def get_mtproto_client() -> MTProtoClient:
     if _mtproto_client is None:
         _mtproto_client = MTProtoClient()
     return _mtproto_client
-

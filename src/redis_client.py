@@ -5,6 +5,7 @@ from typing import Set, Optional, List, Tuple
 from enum import Enum
 from datetime import datetime, timedelta
 import logging
+import json
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,16 @@ class RedisClient:
             Redis key string: "summarry:channel:{channel_id}:{topic_handle}"
         """
         return f"summarry:channel:{channel_id}:{topic_handle}"
+
+    def build_message_metadata_key(self, chat_id: int, message_id: int) -> str:
+        return f"telegram:message:{chat_id}:{message_id}"
+
+    def build_agent_session_key(self, chat_id: int, user_id: int, thread_id: Optional[int]) -> str:
+        return f"telegram:agent-session:{chat_id}:{user_id}:{thread_id or 0}"
+
+    def build_agents_api_session_key(self, chat_id: int, thread_id: Optional[int]) -> str:
+        """One managed Agents API conversation per Telegram chat topic."""
+        return f"telegram:agents-api-session:{chat_id}:{thread_id or 0}"
     
     def append_message(self, channel_id: int, user_id: int, message_id: int, message_timestamp: datetime) -> bool:
         """
@@ -132,6 +143,122 @@ class RedisClient:
         except Exception as e:
             logger.error(f"Error appending message to Redis: {e}")
             return False
+
+    def store_message_index(
+        self,
+        chat_id: int,
+        user_id: int,
+        message_id: int,
+        timestamp: datetime,
+        thread_id: Optional[int] = None,
+    ) -> bool:
+        """Store a compact, expiring message index without copying its text."""
+        is_new = self.append_message(chat_id, user_id, message_id, timestamp)
+        try:
+            key = self.build_message_metadata_key(chat_id, message_id)
+            self.client.hset(
+                key,
+                mapping={
+                    "user_id": user_id,
+                    "timestamp": timestamp.timestamp(),
+                    "thread_id": thread_id or 0,
+                },
+            )
+            self.client.expire(key, 7 * 24 * 60 * 60)
+        except Exception as exc:
+            logger.error(f"Error storing message metadata: {exc}")
+        return is_new
+
+    def get_indexed_messages_by_time_range(
+        self,
+        chat_id: int,
+        start_time: datetime,
+        end_time: Optional[datetime] = None,
+    ) -> List[Tuple[int, int, float]]:
+        """Return (author_id, message_id, timestamp) ordered oldest first."""
+        records = self.get_messages_by_time_range(chat_id, start_time, end_time)
+        result: List[Tuple[int, int, float]] = []
+        for value, timestamp in records:
+            try:
+                user_id, message_id = (int(part) for part in value.split(":", 1))
+                result.append((user_id, message_id, timestamp))
+            except (TypeError, ValueError):
+                logger.warning(f"Could not parse indexed message {value!r}")
+        return result
+
+    def store_reaction_count(self, chat_id: int, message_id: int, total_count: int) -> None:
+        """Keep the latest aggregate reaction total for one indexed message."""
+        try:
+            key = self.build_message_metadata_key(chat_id, message_id)
+            if not self.client.exists(key):
+                return
+            self.client.hset(key, "reaction_count", total_count)
+            self.client.expire(key, 7 * 24 * 60 * 60)
+        except Exception as exc:
+            logger.error(f"Error storing reaction count: {exc}")
+
+    def adjust_reaction_count(self, chat_id: int, message_id: int, delta: int) -> None:
+        """Apply a non-anonymous user's reaction change to the local aggregate."""
+        try:
+            key = self.build_message_metadata_key(chat_id, message_id)
+            if not self.client.exists(key):
+                return
+            current = int(self.client.hget(key, "reaction_count") or 0)
+            self.client.hset(key, "reaction_count", max(0, current + delta))
+            self.client.expire(key, 7 * 24 * 60 * 60)
+        except Exception as exc:
+            logger.error(f"Error adjusting reaction count: {exc}")
+
+    def get_top_speakers_by_reactions(
+        self,
+        chat_id: int,
+        start_time: datetime,
+        end_time: Optional[datetime] = None,
+        limit: int = 3,
+    ) -> List[dict]:
+        """Rank message authors by reactions received on messages in a period."""
+        totals: dict[int, int] = {}
+        try:
+            for user_id, message_id, _ in self.get_indexed_messages_by_time_range(chat_id, start_time, end_time):
+                metadata = self.client.hgetall(self.build_message_metadata_key(chat_id, message_id))
+                reactions = int(metadata.get("reaction_count", 0)) if metadata else 0
+                totals[user_id] = totals.get(user_id, 0) + reactions
+            return [
+                {"user_id": user_id, "reaction_count": reactions}
+                for user_id, reactions in sorted(totals.items(), key=lambda item: item[1], reverse=True)[:limit]
+            ]
+        except Exception as exc:
+            logger.error(f"Error calculating reaction leaderboard: {exc}")
+            return []
+
+    def enqueue_agent_job(self, job: dict) -> None:
+        self.client.lpush("telegram:agent-jobs", json.dumps(job, ensure_ascii=False))
+
+    def dequeue_agent_job(self, timeout_seconds: int = 5) -> Optional[dict]:
+        item = self.client.brpop("telegram:agent-jobs", timeout=timeout_seconds)
+        if not item:
+            return None
+        _, payload = item
+        return json.loads(payload)
+
+    def claim_update(self, update_id: int) -> bool:
+        """Return true only on first delivery of a Telegram update."""
+        return bool(self.client.set(f"telegram:update:{update_id}", "1", nx=True, ex=24 * 60 * 60))
+
+    def release_update_claim(self, update_id: int) -> None:
+        self.client.delete(f"telegram:update:{update_id}")
+
+    def get_agent_response_id(self, chat_id: int, user_id: int, thread_id: Optional[int]) -> Optional[str]:
+        return self.client.get(self.build_agent_session_key(chat_id, user_id, thread_id))
+
+    def set_agent_response_id(self, chat_id: int, user_id: int, thread_id: Optional[int], response_id: str) -> None:
+        self.client.setex(self.build_agent_session_key(chat_id, user_id, thread_id), 7 * 24 * 60 * 60, response_id)
+
+    def get_agents_api_session_id(self, chat_id: int, thread_id: Optional[int]) -> Optional[str]:
+        return self.client.get(self.build_agents_api_session_key(chat_id, thread_id))
+
+    def set_agents_api_session_id(self, chat_id: int, thread_id: Optional[int], session_id: str) -> None:
+        self.client.setex(self.build_agents_api_session_key(chat_id, thread_id), 7 * 24 * 60 * 60, session_id)
     
     def get_messages_by_time_range(
         self, 
@@ -425,4 +552,3 @@ class RedisClient:
 
 # Global Redis client instance
 redis_client = RedisClient()
-
