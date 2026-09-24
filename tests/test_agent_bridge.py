@@ -11,6 +11,7 @@ sys.modules.setdefault("telegram", types.SimpleNamespace(Update=object))
 sys.modules.setdefault("message_storage", types.SimpleNamespace(message_storage=object()))
 sys.modules.setdefault("redis_client", types.SimpleNamespace(redis_client=object()))
 extract_alfred_request = importlib.import_module("agent_bridge").extract_alfred_request
+extract_replied_context = importlib.import_module("agent_bridge").extract_replied_context
 
 
 class AlfredInvocationTests(unittest.TestCase):
@@ -25,6 +26,17 @@ class AlfredInvocationTests(unittest.TestCase):
 
     def test_does_not_accept_name_as_a_prefix_of_a_word(self):
         self.assertIsNone(extract_alfred_request("Альфредовна, привет"))
+
+    def test_replied_message_text_becomes_context(self):
+        message = types.SimpleNamespace(reply_to_message=types.SimpleNamespace(text="Проверяемое утверждение"))
+        self.assertEqual(extract_replied_context(message), "Проверяемое утверждение")
+
+    def test_replied_context_is_bounded(self):
+        source = importlib.import_module("agent_bridge")
+        message = types.SimpleNamespace(reply_to_message=types.SimpleNamespace(text="x" * (source.MAX_REPLIED_CONTEXT_CHARS + 1)))
+        context = extract_replied_context(message)
+        self.assertTrue(context.endswith("[цитата обрезана]"))
+        self.assertLessEqual(len(context), source.MAX_REPLIED_CONTEXT_CHARS + len("\n[цитата обрезана]"))
 
 
 if __name__ == "__main__":

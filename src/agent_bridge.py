@@ -14,6 +14,8 @@ from telegram import Update
 from message_storage import message_storage
 from redis_client import redis_client
 
+MAX_REPLIED_CONTEXT_CHARS = 12_000
+
 
 def extract_alfred_request(text: str | None) -> str | None:
     """Return text after an initial 'Alfred/Альфред' invocation, if present."""
@@ -34,6 +36,20 @@ def extract_alfred_request(text: str | None) -> str | None:
 def _is_reply_to_bot(message: Any, bot_id: int) -> bool:
     replied = getattr(message, "reply_to_message", None)
     return bool(replied and replied.from_user and replied.from_user.id == bot_id)
+
+
+def extract_replied_context(message: Any) -> str | None:
+    """Return bounded text/caption from the message quoted by a Telegram reply."""
+    replied = getattr(message, "reply_to_message", None)
+    if not replied:
+        return None
+    text = getattr(replied, "text", None) or getattr(replied, "caption", None)
+    if not text:
+        return None
+    text = str(text)
+    if len(text) > MAX_REPLIED_CONTEXT_CHARS:
+        return f"{text[:MAX_REPLIED_CONTEXT_CHARS]}\n[цитата обрезана]"
+    return text
 
 
 async def enqueue_update(update: Update, bot_id: int) -> bool:
@@ -81,6 +97,7 @@ async def enqueue_update(update: Update, bot_id: int) -> bool:
             return False
 
         replied_message_id = message.reply_to_message.message_id if message.reply_to_message else None
+        replied_context = extract_replied_context(message)
         delivery_id = redis_client.create_agent_delivery(
             chat_id=message.chat_id,
             message_id=message.message_id,
@@ -93,6 +110,7 @@ async def enqueue_update(update: Update, bot_id: int) -> bool:
                 "thread_id": message.message_thread_id,
                 "message_id": message.message_id,
                 "reply_to_message_id": replied_message_id,
+                "reply_to_message_text": replied_context,
                 "delivery_id": delivery_id,
                 "text": user_text,
                 "timestamp": timestamp.isoformat(),
