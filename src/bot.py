@@ -19,6 +19,9 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
+# httpx logs full request URLs. Telegram Bot API embeds the token in that URL,
+# so never emit its INFO-level request logs in a hosted environment.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 ALLOWED_UPDATES = [
