@@ -41,14 +41,18 @@ async def enqueue_update(update: Update, bot_id: int) -> bool:
     if not redis_client.claim_update(update.update_id):
         return False
     try:
-        if update.message_reaction_count:
-            reaction = update.message_reaction_count
+        # python-telegram-bot 20.7 does not expose reaction fields on every
+        # Update object, even when Telegram has enabled these update types.
+        reaction_count = getattr(update, "message_reaction_count", None)
+        if reaction_count:
+            reaction = reaction_count
             total = sum(item.total_count for item in reaction.reactions)
             message_storage.record_reaction_count(reaction.chat.id, reaction.message_id, total)
             return False
 
-        if update.message_reaction:
-            reaction = update.message_reaction
+        reaction_change = getattr(update, "message_reaction", None)
+        if reaction_change:
+            reaction = reaction_change
             delta = len(reaction.new_reaction) - len(reaction.old_reaction)
             message_storage.adjust_reaction_count(reaction.chat.id, reaction.message_id, delta)
             return False
