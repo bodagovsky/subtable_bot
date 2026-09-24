@@ -1,4 +1,5 @@
-python-telegram-bot==20.7
+# 21.x uses httpx 0.27, compatible with MCP 1.x / FastMCP used below.
+python-telegram-bot==21.10
 openai>=1.0,<3
 python-dotenv==1.0.0
 aiohttp==3.9.1
