@@ -17,6 +17,9 @@ jobs:
       HEROKU_API_KEY: "${{ secrets.HEROKU_API_KEY }}"
     
     steps:
+    - name: Check out deployment source
+      uses: actions/checkout@v4
+
     - name: Install Heroku CLI
       run: |
         curl https://cli-assets.heroku.com/install.sh | sh
@@ -52,3 +55,13 @@ jobs:
           REDIS_PORT="${{ secrets.REDIS_PORT }}" \
           REDIS_USERNAME="${{ secrets.REDIS_USERNAME }}" \
           --app "${{ vars.HEROKU_MCP_APP_NAME }}"
+
+    - name: Deploy both Heroku apps
+      env:
+        HEROKU_TELEGRAM_APP_NAME: "${{ vars.HEROKU_TELEGRAM_APP_NAME }}"
+        HEROKU_MCP_APP_NAME: "${{ vars.HEROKU_MCP_APP_NAME }}"
+      run: |
+        printf "machine git.heroku.com\n  login _\n  password %s\n" "$HEROKU_API_KEY" > ~/.netrc
+        chmod 600 ~/.netrc
+        git push "https://git.heroku.com/$HEROKU_TELEGRAM_APP_NAME.git" HEAD:main
+        git push "https://git.heroku.com/$HEROKU_MCP_APP_NAME.git" HEAD:main
