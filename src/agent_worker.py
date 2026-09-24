@@ -88,7 +88,9 @@ async def _create_session(job: dict[str, Any]) -> str:
     """Create and stream the first turn, so its output and tool calls are seen."""
     payload = {
         "agent_id": AGENT_ID, "agent": _agent_override(), "environment": {"type": "none"}, "stream": True,
-        "input": [{"role": "user", "content": [{"type": "input_text", "text": _input_for(job)}]}],
+        # A session's initial input is text. Follow-up turns use the structured
+        # agent.session.input.message event below.
+        "input": _input_for(job),
     }
     process = await asyncio.create_subprocess_exec(
         "curl", "--silent", "--show-error", "--fail-with-body", "--no-buffer", "-N", "-X", "POST", API_URL,
@@ -96,7 +98,7 @@ async def _create_session(job: dict[str, Any]) -> str:
         "-H", "Content-Type: application/json", "--data-binary", "@-",
         stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
-    assert process.stdin and process.stdout
+    assert process.stdin and process.stdout and process.stderr
     process.stdin.write(json.dumps(payload, ensure_ascii=False).encode())
     await process.stdin.drain()
     process.stdin.close()
@@ -120,8 +122,11 @@ async def _create_session(job: dict[str, Any]) -> str:
         if process.returncode is None:
             process.terminate()
         await process.wait()
+    stderr = (await process.stderr.read()).decode().strip()
+    if process.returncode:
+        raise AgentsAPIError(stderr or f"Agents API create-session curl exited {process.returncode}")
     if not session_id:
-        raise AgentsAPIError("Agents API stream ended without a session ID")
+        raise AgentsAPIError(f"Agents API stream ended without a session ID: {stderr or 'no error body'}")
     return session_id
 
 
