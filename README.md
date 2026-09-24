@@ -101,6 +101,12 @@ in Redis, streams events, and exposes only selected Telegram MCP tools. The agen
 uses `telegram_reply` itself for both completed answers and clarification questions;
 the worker never duplicates that Telegram message.
 
+Because the MCP connection originates from OpenAI's service, store
+`TELEGRAM_MCP_AUTH_TOKEN` as a `static_bearer` credential in an OpenAI Vault bound
+to `TELEGRAM_MCP_URL`. Set the resulting `OPENAI_MCP_VAULT_ID` in the worker. The
+worker attaches this Vault to the session and never includes the bearer token in
+the agent configuration.
+
 The remote MCP connection is made by OpenAI (`connection_origin: service`) and
 uses `environment: none`, so this production flow does **not** need a local Codex
 executor or `OPENAI_EXECUTOR_API_KEY`.

@@ -42,6 +42,7 @@ jobs:
           TELEGRAM_BOT_TOKEN="${{ secrets.TELEGRAM_BOT_TOKEN }}" \
           TELEGRAM_MCP_URL="${{ secrets.TELEGRAM_MCP_URL }}" \
           TELEGRAM_MCP_AUTH_TOKEN="${{ secrets.TELEGRAM_MCP_AUTH_TOKEN }}" \
+          OPENAI_MCP_VAULT_ID="${{ secrets.OPENAI_MCP_VAULT_ID }}" \
           --app "${{ vars.HEROKU_TELEGRAM_APP_NAME }}"
     - name: Set MCP app config vars from GitHub Secrets
       run: |

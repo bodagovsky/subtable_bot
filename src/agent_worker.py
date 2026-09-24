@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 API_URL = "https://api.openai.com/v1/agents/sessions"
 AGENT_ID = "agent_2583c5f919304bcebcd425b2238a55a78faeae928acf4a4e82"
 MCP_URL = os.getenv("TELEGRAM_MCP_URL", "").rstrip("/")
-MCP_TOKEN = os.getenv("TELEGRAM_MCP_AUTH_TOKEN", "")
+MCP_VAULT_ID = os.getenv("OPENAI_MCP_VAULT_ID", "").strip()
 
 INSTRUCTIONS = """You are a helpful workplace teammate responding to requests from Telegram. Produce clear answers and useful work grounded in the conversation and materials available to you. Respond in Russian. You are Alfred, Batman's retired assistant, helping others do their work.
 
@@ -69,8 +69,7 @@ def _agent_override() -> dict[str, Any]:
                                "telegram_get_messages_in_time_range", "telegram_get_top_speakers_by_reactions",
                                "telegram_reply"],
              "connection_origin": "service",
-             "transport": {"type": "http", "server_url": MCP_URL,
-                           "headers": {"Authorization": f"Bearer {MCP_TOKEN}"}}},
+             "transport": {"type": "http", "server_url": MCP_URL}},
         ],
     }
 
@@ -87,7 +86,8 @@ def _input_for(job: dict[str, Any]) -> str:
 async def _create_session(job: dict[str, Any]) -> str:
     """Create and stream the first turn, so its output and tool calls are seen."""
     payload = {
-        "agent_id": AGENT_ID, "agent": _agent_override(), "environment": {"type": "none"}, "stream": True,
+        "agent_id": AGENT_ID, "agent": _agent_override(), "environment": {"type": "none"},
+        "vault_ids": [MCP_VAULT_ID], "stream": True,
         # A session's initial input is text. Follow-up turns use the structured
         # agent.session.input.message event below.
         "input": _input_for(job),
@@ -191,8 +191,8 @@ async def _run_job(job: dict[str, Any]) -> None:
 async def run_worker() -> None:
     if not MCP_URL.startswith("https://"):
         raise RuntimeError("TELEGRAM_MCP_URL must be a public HTTPS MCP endpoint")
-    if len(MCP_TOKEN) < 32:
-        raise RuntimeError("TELEGRAM_MCP_AUTH_TOKEN must contain at least 32 characters")
+    if not MCP_VAULT_ID.startswith("vault_"):
+        raise RuntimeError("OPENAI_MCP_VAULT_ID must contain the OpenAI Vault ID for Telegram MCP")
     if not os.getenv("OPENAI_API_KEY"):
         raise RuntimeError("OPENAI_API_KEY is required")
     logger.info("Agents API worker started; MCP endpoint: %s", MCP_URL)
