@@ -103,11 +103,14 @@ async def _create_session(job: dict[str, Any]) -> str:
     await process.stdin.drain()
     process.stdin.close()
     session_id: str | None = None
+    non_sse_output: list[str] = []
     terminal = {"agent.session.turn.completed", "agent.session.turn.failed", "agent.session.turn.cancelled", "agent.session.failed"}
     try:
         async for raw in process.stdout:
             line = raw.decode().strip()
             if not line.startswith("data:"):
+                if line:
+                    non_sse_output.append(line)
                 continue
             event = json.loads(line[5:].strip())
             data = event.get("data") or event
@@ -124,7 +127,8 @@ async def _create_session(job: dict[str, Any]) -> str:
         await process.wait()
     stderr = (await process.stderr.read()).decode().strip()
     if process.returncode:
-        raise AgentsAPIError(stderr or f"Agents API create-session curl exited {process.returncode}")
+        details = "\n".join(non_sse_output).strip()
+        raise AgentsAPIError(details or stderr or f"Agents API create-session curl exited {process.returncode}")
     if not session_id:
         raise AgentsAPIError(f"Agents API stream ended without a session ID: {stderr or 'no error body'}")
     return session_id
