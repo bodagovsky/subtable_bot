@@ -13,6 +13,8 @@ jobs:
   sync-config:
     runs-on: ubuntu-latest
     environment: production
+    env:
+      HEROKU_API_KEY: "${{ secrets.HEROKU_API_KEY }}"
     
     steps:
     - name: Install Heroku CLI
@@ -50,5 +52,3 @@ jobs:
           REDIS_PORT="${{ secrets.REDIS_PORT }}" \
           REDIS_USERNAME="${{ secrets.REDIS_USERNAME }}" \
           --app "${{ vars.HEROKU_MCP_APP_NAME }}"
-      env:
-        HEROKU_API_KEY: "${{ secrets.HEROKU_API_KEY }}"
