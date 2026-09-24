@@ -91,6 +91,10 @@ class RedisClient:
         """One managed Agents API conversation per Telegram chat topic."""
         return f"telegram:agents-api-session:{chat_id}:{thread_id or 0}"
 
+    def build_agents_api_message_session_key(self, chat_id: int, message_id: int) -> str:
+        """Map a Telegram message to the managed conversation that handled it."""
+        return f"telegram:agents-api-message-session:{chat_id}:{message_id}"
+
     def build_agent_delivery_key(self, delivery_id: str) -> str:
         """Key for a short-lived, single-use reply capability."""
         return f"telegram:agent-delivery:{delivery_id}"
@@ -130,6 +134,19 @@ class RedisClient:
         """Atomically consume a delivery capability before its side effect."""
         payload = self.client.getdel(self.build_agent_delivery_key(delivery_id))
         return json.loads(payload) if payload else None
+
+    def set_agent_delivery_session_id(self, delivery_id: str, session_id: str) -> bool:
+        """Associate a pending reply capability with its Agents API session."""
+        key = self.build_agent_delivery_key(delivery_id)
+        payload = self.client.get(key)
+        if not payload:
+            return False
+        ttl_seconds = self.client.ttl(key)
+        if ttl_seconds <= 0:
+            return False
+        delivery = json.loads(payload)
+        delivery["session_id"] = session_id
+        return bool(self.client.set(key, json.dumps(delivery, ensure_ascii=False), xx=True, ex=ttl_seconds))
     
     def append_message(self, channel_id: int, user_id: int, message_id: int, message_timestamp: datetime) -> bool:
         """
@@ -300,6 +317,18 @@ class RedisClient:
 
     def set_agents_api_session_id(self, chat_id: int, thread_id: Optional[int], session_id: str) -> None:
         self.client.setex(self.build_agents_api_session_key(chat_id, thread_id), 7 * 24 * 60 * 60, session_id)
+
+    def get_agents_api_session_id_for_message(self, chat_id: int, message_id: int) -> Optional[str]:
+        """Return the session that previously handled a Telegram message."""
+        return self.client.get(self.build_agents_api_message_session_key(chat_id, message_id))
+
+    def set_agents_api_session_id_for_message(self, chat_id: int, message_id: int, session_id: str) -> None:
+        """Keep reply-to-session routing only as long as the chat index exists."""
+        self.client.setex(
+            self.build_agents_api_message_session_key(chat_id, message_id),
+            7 * 24 * 60 * 60,
+            session_id,
+        )
     
     def get_messages_by_time_range(
         self, 

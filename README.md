@@ -146,6 +146,11 @@ with the real chat/message/topic IDs in Redis. The worker gives only that opaque
 ID to the agent, which selects MCP tools itself and sends its own reply through
 the protected MCP server.
 
+Each Agents API session is shared by a chat/topic for up to seven days. When a
+user replies to a message that was handled by Alfred (including Alfred's own
+reply), the worker continues that message's session instead of selecting the
+chat/topic default.
+
 Start the services in separate terminals:
 
 ```bash

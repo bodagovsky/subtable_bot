@@ -257,12 +257,18 @@ def create_server(host: str = "127.0.0.1", port: int = 8000) -> FastMCP:
         delivery = redis_client.consume_agent_delivery(delivery_id)
         if not delivery:
             raise RuntimeError("delivery_id is unknown, expired, or already used")
-        return await _send_telegram_message(
+        sent = await _send_telegram_message(
             delivery["chat_id"],
             text,
             delivery["message_id"],
             delivery.get("thread_id"),
         )
+        session_id = delivery.get("session_id")
+        if session_id:
+            redis_client.set_agents_api_session_id_for_message(
+                sent["chat_id"], sent["message_id"], session_id
+            )
+        return sent
 
     @server.tool()
     async def telegram_get_bot_identity() -> dict[str, Any]:

@@ -2,6 +2,7 @@
 
 The managed agent calls the project's HTTPS Telegram MCP server itself. This
 worker only queues input, watches turns, and keeps a session per chat topic.
+Replies continue the session that handled the replied-to message.
 """
 from __future__ import annotations
 
@@ -112,6 +113,7 @@ async def _create_session(job: dict[str, Any]) -> str:
     await process.stdin.drain()
     process.stdin.close()
     session_id: str | None = None
+    session_routing_bound = False
     non_sse_output: list[str] = []
     terminal = {"agent.session.turn.completed", "agent.session.turn.failed", "agent.session.turn.cancelled", "agent.session.failed"}
     try:
@@ -124,6 +126,15 @@ async def _create_session(job: dict[str, Any]) -> str:
             event = json.loads(line[5:].strip())
             data = event.get("data") or event
             session_id = session_id or data.get("id") or event.get("session_id")
+            if session_id and not session_routing_bound:
+                # Bind before the turn can call telegram_reply, so replies to
+                # either this user message or Alfred's eventual answer retain
+                # the same conversation.
+                redis_client.set_agents_api_session_id_for_message(
+                    job["chat_id"], job["message_id"], session_id
+                )
+                redis_client.set_agent_delivery_session_id(job["delivery_id"], session_id)
+                session_routing_bound = True
             event_type = event.get("type", "unknown")
             logger.info("Agents API new session event: %s", event_type)
             if event_type in terminal:
@@ -181,9 +192,26 @@ async def _watch_turn(session_id: str) -> None:
         await process.wait()
 
 
+def _preferred_session_id(job: dict[str, Any]) -> str | None:
+    """Prefer the conversation associated with the message being replied to."""
+    replied_message_id = job.get("reply_to_message_id")
+    if replied_message_id:
+        session_id = redis_client.get_agents_api_session_id_for_message(job["chat_id"], replied_message_id)
+        if session_id:
+            logger.info(
+                "Using session %s from replied Telegram message %s",
+                session_id,
+                replied_message_id,
+            )
+            return session_id
+    return redis_client.get_agents_api_session_id(job["chat_id"], job.get("thread_id"))
+
+
 async def _run_job(job: dict[str, Any]) -> None:
-    session_id = redis_client.get_agents_api_session_id(job["chat_id"], job.get("thread_id"))
+    session_id = _preferred_session_id(job)
     if session_id:
+        redis_client.set_agents_api_session_id_for_message(job["chat_id"], job["message_id"], session_id)
+        redis_client.set_agent_delivery_session_id(job["delivery_id"], session_id)
         watcher = asyncio.create_task(_watch_turn(session_id))
         try:
             await _send_message(session_id, job)
@@ -194,6 +222,8 @@ async def _run_job(job: dict[str, Any]) -> None:
             logger.warning("Replacing unusable session %s: %s", session_id, exc)
     session_id = await _create_session(job)
     redis_client.set_agents_api_session_id(job["chat_id"], job.get("thread_id"), session_id)
+    redis_client.set_agents_api_session_id_for_message(job["chat_id"], job["message_id"], session_id)
+    redis_client.set_agent_delivery_session_id(job["delivery_id"], session_id)
     logger.info("Created Agents API session %s for chat %s", session_id, job["chat_id"])
 
 
