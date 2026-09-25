@@ -43,6 +43,9 @@ undertable bot/
 `src/telegram_mcp.py` exposes the bot's Telegram capabilities as MCP tools for an
 agent. It keeps the existing Telegram SDK choices: the Bot API
 (`python-telegram-bot`) sends messages, and Telethon/MTProto reads recent history.
+It also exposes `weather_forecast(latitude, longitude)`, backed by Yandex
+Weather. Set `YANDEX_WEATHER_API_KEY` only on the MCP app; the agent receives
+the forecast result but never the key.
 
 Install dependencies and start a local stdio server:
 

@@ -52,6 +52,7 @@ jobs:
           TELEGRAM_API_HASH="${{ secrets.TELEGRAM_API_HASH }}" \
           TELEGRAM_API_ID="${{ secrets.TELEGRAM_API_ID }}" \
           TELEGRAM_MCP_AUTH_TOKEN="${{ secrets.TELEGRAM_MCP_AUTH_TOKEN }}" \
+          YANDEX_WEATHER_API_KEY="${{ secrets.YANDEX_WEATHER_API_KEY }}" \
           REDISCLOUD_URL="${{ secrets.REDISCLOUD_URL }}" \
           REDIS_PASSWORD="${{ secrets.REDIS_PASSWORD }}" \
           REDIS_PORT="${{ secrets.REDIS_PORT }}" \

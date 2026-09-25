@@ -17,6 +17,7 @@ import os
 from datetime import datetime
 from typing import Any
 
+import requests
 from mcp.server.fastmcp import FastMCP
 from telegram import Bot
 
@@ -27,6 +28,7 @@ from redis_client import redis_client
 
 MAX_MESSAGE_LENGTH = 4096
 MAX_HISTORY_LIMIT = 100
+YANDEX_WEATHER_URL = "https://api.weather.yandex.ru/v2/forecast"
 _telegram_lock = asyncio.Lock()
 
 
@@ -66,6 +68,29 @@ def _assert_can_send(chat_id: int, text: str) -> None:
         raise ValueError("text must not be empty")
     if len(text) > MAX_MESSAGE_LENGTH:
         raise ValueError(f"text must be at most {MAX_MESSAGE_LENGTH} characters")
+
+
+def _yandex_weather_api_key() -> str:
+    key = os.getenv("YANDEX_WEATHER_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError("YANDEX_WEATHER_API_KEY is not configured")
+    return key
+
+
+def _fetch_weather(latitude: float, longitude: float) -> dict[str, Any]:
+    """Fetch a Yandex Weather forecast without exposing the API key."""
+    if not -90 <= latitude <= 90:
+        raise ValueError("latitude must be between -90 and 90")
+    if not -180 <= longitude <= 180:
+        raise ValueError("longitude must be between -180 and 180")
+    response = requests.get(
+        YANDEX_WEATHER_URL,
+        params={"lat": latitude, "lon": longitude},
+        headers={"X-Yandex-Weather-Key": _yandex_weather_api_key()},
+        timeout=15,
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 async def _send_telegram_message(
@@ -232,6 +257,16 @@ def create_server(host: str = "127.0.0.1", port: int = 8000) -> FastMCP:
             {"user_id": user_id, "reaction_count": reaction_count}
             for user_id, reaction_count in sorted(totals.items(), key=lambda item: item[1], reverse=True)[:3]
         ]
+
+    @server.tool()
+    async def weather_forecast(latitude: float, longitude: float) -> dict[str, Any]:
+        """Get the current weather and forecast from Yandex Weather.
+
+        Use this tool for every weather request. Supply decimal WGS-84
+        coordinates and never substitute a remembered forecast. The API key
+        remains on this server and is never returned to the agent.
+        """
+        return await asyncio.to_thread(_fetch_weather, latitude, longitude)
 
     @server.tool()
     async def telegram_send_message(
