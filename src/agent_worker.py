@@ -131,10 +131,7 @@ async def _create_session(job: dict[str, Any]) -> str:
                 # Bind before the turn can call telegram_reply, so replies to
                 # either this user message or Alfred's eventual answer retain
                 # the same conversation.
-                redis_client.set_agents_api_session_id_for_message(
-                    job["chat_id"], job["message_id"], session_id
-                )
-                redis_client.set_agent_delivery_session_id(job["delivery_id"], session_id)
+                _bind_job_to_session(job, session_id)
                 session_routing_bound = True
             event_type = event.get("type", "unknown")
             logger.info("Agents API new session event: %s", event_type)
@@ -197,7 +194,7 @@ async def _watch_turn(session_id: str) -> None:
 
 
 def _preferred_session_id(job: dict[str, Any]) -> str | None:
-    """Prefer the conversation associated with the message being replied to."""
+    """Prefer a replied-to discussion, then the sender's active discussion."""
     replied_message_id = job.get("reply_to_message_id")
     if replied_message_id:
         session_id = redis_client.get_agents_api_session_id_for_message(job["chat_id"], replied_message_id)
@@ -208,14 +205,20 @@ def _preferred_session_id(job: dict[str, Any]) -> str | None:
                 replied_message_id,
             )
             return session_id
-    return redis_client.get_agents_api_session_id(job["chat_id"], job.get("thread_id"))
+    return redis_client.get_active_agents_api_session_id_for_user(job["chat_id"], job["user_id"])
+
+
+def _bind_job_to_session(job: dict[str, Any], session_id: str) -> None:
+    """Save reply routing and the bidirectional participant relationship."""
+    redis_client.set_agents_api_session_id_for_message(job["chat_id"], job["message_id"], session_id)
+    redis_client.set_agent_delivery_session_id(job["delivery_id"], session_id)
+    redis_client.add_agents_api_session_participant(job["chat_id"], session_id, job["user_id"])
 
 
 async def _run_job(job: dict[str, Any]) -> None:
     session_id = _preferred_session_id(job)
     if session_id:
-        redis_client.set_agents_api_session_id_for_message(job["chat_id"], job["message_id"], session_id)
-        redis_client.set_agent_delivery_session_id(job["delivery_id"], session_id)
+        _bind_job_to_session(job, session_id)
         watcher = asyncio.create_task(_watch_turn(session_id))
         try:
             await _send_message(session_id, job)
@@ -225,10 +228,8 @@ async def _run_job(job: dict[str, Any]) -> None:
             watcher.cancel()
             logger.warning("Replacing unusable session %s: %s", session_id, exc)
     session_id = await _create_session(job)
-    redis_client.set_agents_api_session_id(job["chat_id"], job.get("thread_id"), session_id)
-    redis_client.set_agents_api_session_id_for_message(job["chat_id"], job["message_id"], session_id)
-    redis_client.set_agent_delivery_session_id(job["delivery_id"], session_id)
-    logger.info("Created Agents API session %s for chat %s", session_id, job["chat_id"])
+    _bind_job_to_session(job, session_id)
+    logger.info("Created Agents API session %s for chat %s and user %s", session_id, job["chat_id"], job["user_id"])
 
 
 async def run_worker() -> None:

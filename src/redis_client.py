@@ -10,6 +10,8 @@ import secrets
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+# Session routing is short-lived: durable chat history uses a separate index.
+AGENT_SESSION_TTL_SECONDS = 60 * 60
 
 
 class RedisType(Enum):
@@ -88,12 +90,21 @@ class RedisClient:
         return f"telegram:agent-session:{chat_id}:{user_id}:{thread_id or 0}"
 
     def build_agents_api_session_key(self, chat_id: int, thread_id: Optional[int]) -> str:
-        """One managed Agents API conversation per Telegram chat topic."""
+        """Legacy chat-topic fallback key kept for existing Redis data."""
         return f"telegram:agents-api-session:{chat_id}:{thread_id or 0}"
 
     def build_agents_api_message_session_key(self, chat_id: int, message_id: int) -> str:
         """Map a Telegram message to the managed conversation that handled it."""
         return f"telegram:agents-api-message-session:{chat_id}:{message_id}"
+
+    def build_agents_api_session_users_key(self, chat_id: int, session_id: str) -> str:
+        return f"telegram:agents-api-session-users:{chat_id}:{session_id}"
+
+    def build_agents_api_user_sessions_key(self, chat_id: int, user_id: int) -> str:
+        return f"telegram:agents-api-user-sessions:{chat_id}:{user_id}"
+
+    def build_agents_api_active_user_session_key(self, chat_id: int, user_id: int) -> str:
+        return f"telegram:agents-api-active-user-session:{chat_id}:{user_id}"
 
     def build_agent_delivery_key(self, delivery_id: str) -> str:
         """Key for a short-lived, single-use reply capability."""
@@ -316,7 +327,7 @@ class RedisClient:
         return self.client.get(self.build_agents_api_session_key(chat_id, thread_id))
 
     def set_agents_api_session_id(self, chat_id: int, thread_id: Optional[int], session_id: str) -> None:
-        self.client.setex(self.build_agents_api_session_key(chat_id, thread_id), 7 * 24 * 60 * 60, session_id)
+        self.client.setex(self.build_agents_api_session_key(chat_id, thread_id), AGENT_SESSION_TTL_SECONDS, session_id)
 
     def get_agents_api_session_id_for_message(self, chat_id: int, message_id: int) -> Optional[str]:
         """Return the session that previously handled a Telegram message."""
@@ -326,9 +337,30 @@ class RedisClient:
         """Keep reply-to-session routing only as long as the chat index exists."""
         self.client.setex(
             self.build_agents_api_message_session_key(chat_id, message_id),
-            7 * 24 * 60 * 60,
+            AGENT_SESSION_TTL_SECONDS,
             session_id,
         )
+
+    def get_active_agents_api_session_id_for_user(self, chat_id: int, user_id: int) -> Optional[str]:
+        """Return the most recently used Alfred session for one chat participant."""
+        return self.client.get(self.build_agents_api_active_user_session_key(chat_id, user_id))
+
+    def add_agents_api_session_participant(self, chat_id: int, session_id: str, user_id: int) -> None:
+        """Record a many-to-many user/session relationship and make it active.
+
+        Session membership is scoped to the Telegram chat, so the same person
+        can participate in independent discussions in different chats.
+        """
+        session_users_key = self.build_agents_api_session_users_key(chat_id, session_id)
+        user_sessions_key = self.build_agents_api_user_sessions_key(chat_id, user_id)
+        active_key = self.build_agents_api_active_user_session_key(chat_id, user_id)
+        with self.client.pipeline(transaction=True) as pipe:
+            pipe.sadd(session_users_key, user_id)
+            pipe.expire(session_users_key, AGENT_SESSION_TTL_SECONDS)
+            pipe.sadd(user_sessions_key, session_id)
+            pipe.expire(user_sessions_key, AGENT_SESSION_TTL_SECONDS)
+            pipe.setex(active_key, AGENT_SESSION_TTL_SECONDS, session_id)
+            pipe.execute()
     
     def get_messages_by_time_range(
         self, 
