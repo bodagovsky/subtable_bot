@@ -31,6 +31,13 @@ class AlfredInvocationTests(unittest.TestCase):
         message = types.SimpleNamespace(reply_to_message=types.SimpleNamespace(text="Проверяемое утверждение"))
         self.assertEqual(extract_replied_context(message), "Проверяемое утверждение")
 
+    def test_selected_quote_replaces_full_replied_message(self):
+        message = types.SimpleNamespace(
+            quote=types.SimpleNamespace(text="Только это утверждение"),
+            reply_to_message=types.SimpleNamespace(text="Длинное сообщение, включающее только это утверждение и другой контекст."),
+        )
+        self.assertEqual(extract_replied_context(message), "Только это утверждение")
+
     def test_replied_context_is_bounded(self):
         source = importlib.import_module("agent_bridge")
         message = types.SimpleNamespace(reply_to_message=types.SimpleNamespace(text="x" * (source.MAX_REPLIED_CONTEXT_CHARS + 1)))

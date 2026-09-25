@@ -39,11 +39,12 @@ def _is_reply_to_bot(message: Any, bot_id: int) -> bool:
 
 
 def extract_replied_context(message: Any) -> str | None:
-    """Return bounded text/caption from the message quoted by a Telegram reply."""
+    """Return the selected quote, or the full replied message as a fallback."""
     replied = getattr(message, "reply_to_message", None)
     if not replied:
         return None
-    text = getattr(replied, "text", None) or getattr(replied, "caption", None)
+    quote = getattr(message, "quote", None)
+    text = getattr(quote, "text", None) or getattr(replied, "text", None) or getattr(replied, "caption", None)
     if not text:
         return None
     text = str(text)
