@@ -43,6 +43,7 @@ jobs:
           TELEGRAM_MCP_URL="${{ secrets.TELEGRAM_MCP_URL }}" \
           TELEGRAM_MCP_AUTH_TOKEN="${{ secrets.TELEGRAM_MCP_AUTH_TOKEN }}" \
           OPENAI_MCP_VAULT_ID="${{ secrets.OPENAI_MCP_VAULT_ID }}" \
+          YANDEX_WEATHER_API_KEY="${{ secrets.YANDEX_WEATHER_API_KEY }}" \
           --app "${{ vars.HEROKU_TELEGRAM_APP_NAME }}"
     - name: Set MCP app config vars from GitHub Secrets
       run: |

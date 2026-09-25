@@ -19,6 +19,7 @@ from config import IQAIR_API_KEY
 from mtproto_client import get_mtproto_client
 from chatgpt_client import ChatGPTClient
 from redis_client import RedisClient
+from yandex_weather import YEREVAN_LATITUDE, YEREVAN_LONGITUDE, fetch_forecast
 
 # Load environment variables first
 load_dotenv()
@@ -113,8 +114,8 @@ async def send_weather_report() -> bool:
     Main function to fetch air quality data and send reports to configured channels.
     
     Handles the complete workflow:
-    1. Fetch air quality data from IQAir
-    2. Generate formatted report using ChatGPT
+    1. Fetch air quality data from IQAir and weather from Yandex Weather
+    2. Generate the existing formatted report using ChatGPT
     3. Send report to all configured Telegram channels
     
     Returns:
@@ -133,11 +134,16 @@ async def send_weather_report() -> bool:
         await client.start()
         logger.info("Telegram client started")
         
-        # Fetch air quality data
+        # Keep IQAir as the source for air quality, but use Yandex Weather for
+        # the weather portion of the daily report.
         try:
-            raw_report = air_client.get_raw_report()
+            raw_report = {
+                "air_quality": air_client.get_raw_report(),
+                "weather": fetch_forecast(YEREVAN_LATITUDE, YEREVAN_LONGITUDE),
+                "location": {"name": "Yerevan, Armenia", "latitude": YEREVAN_LATITUDE, "longitude": YEREVAN_LONGITUDE},
+            }
         except Exception as e:
-            logger.error(f"Failed to fetch air quality data: {e}")
+            logger.error(f"Failed to fetch daily weather or air-quality data: {e}")
             return False
         
         # Generate formatted report
